@@ -9,11 +9,20 @@ defmodule SymphonyElixir.WorkflowStore do
   alias SymphonyElixir.Workflow
 
   @poll_interval_ms 1_000
+  @pubsub SymphonyElixir.PubSub
+  @config_topic "workflow:config"
 
   defmodule State do
     @moduledoc false
 
-    defstruct [:path, :stamp, :workflow]
+    defstruct [
+      :path,
+      :stamp,
+      :workflow,
+      :last_reloaded_at,
+      :last_changed_sections,
+      reload_count: 0
+    ]
   end
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -44,6 +53,22 @@ defmodule SymphonyElixir.WorkflowStore do
           {:error, reason} -> {:error, reason}
         end
     end
+  end
+
+  @spec reload_status() :: map()
+  def reload_status do
+    case Process.whereis(__MODULE__) do
+      pid when is_pid(pid) ->
+        GenServer.call(__MODULE__, :reload_status)
+
+      _ ->
+        %{last_reloaded_at: nil, last_changed_sections: [], reload_count: 0}
+    end
+  end
+
+  @spec subscribe_config() :: :ok | {:error, term()}
+  def subscribe_config do
+    Phoenix.PubSub.subscribe(@pubsub, @config_topic)
   end
 
   @impl true
@@ -79,6 +104,15 @@ defmodule SymphonyElixir.WorkflowStore do
     end
   end
 
+  def handle_call(:reload_status, _from, %State{} = state) do
+    {:reply,
+     %{
+       last_reloaded_at: state.last_reloaded_at,
+       last_changed_sections: state.last_changed_sections || [],
+       reload_count: state.reload_count
+     }, state}
+  end
+
   @impl true
   def handle_info(:poll, %State{} = state) do
     schedule_poll()
@@ -106,7 +140,7 @@ defmodule SymphonyElixir.WorkflowStore do
   defp reload_path(path, state) do
     case load_state(path) do
       {:ok, new_state} ->
-        {:ok, new_state}
+        {:ok, record_reload(state, new_state, path)}
 
       {:error, reason} ->
         log_reload_error(path, reason)
@@ -125,6 +159,57 @@ defmodule SymphonyElixir.WorkflowStore do
       {:error, reason} ->
         log_reload_error(path, reason)
         {:error, reason, state}
+    end
+  end
+
+  defp record_reload(old_state, new_state, path) do
+    if old_state.workflow == nil do
+      new_state
+    else
+      changed = config_diff_summary(old_state.workflow, new_state.workflow)
+
+      if changed != [] do
+        Logger.info("WORKFLOW.md reloaded path=#{path} changed_sections=#{inspect(changed)}")
+        broadcast_config_reload(changed)
+
+        %{
+          new_state
+          | last_reloaded_at: DateTime.utc_now(),
+            last_changed_sections: changed,
+            reload_count: old_state.reload_count + 1
+        }
+      else
+        new_state
+      end
+    end
+  end
+
+  defp config_diff_summary(old_workflow, new_workflow) do
+    old_config = Map.get(old_workflow, :config) || %{}
+    new_config = Map.get(new_workflow, :config) || %{}
+
+    all_keys =
+      MapSet.union(
+        MapSet.new(Map.keys(old_config)),
+        MapSet.new(Map.keys(new_config))
+      )
+
+    all_keys
+    |> Enum.filter(fn key -> Map.get(old_config, key) != Map.get(new_config, key) end)
+    |> Enum.sort()
+  end
+
+  defp broadcast_config_reload(changed_sections) do
+    case Process.whereis(@pubsub) do
+      pid when is_pid(pid) ->
+        Phoenix.PubSub.broadcast(
+          @pubsub,
+          @config_topic,
+          {:config_reloaded, %{reloaded_at: DateTime.utc_now(), changed_sections: changed_sections}}
+        )
+
+      _ ->
+        :ok
     end
   end
 
