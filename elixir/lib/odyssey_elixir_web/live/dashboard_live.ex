@@ -63,6 +63,7 @@ defmodule OdysseyElixirWeb.DashboardLive do
           </div>
 
           <div class="status-stack">
+            <a href="/tmux" class="tmux-button">Split View</a>
             <span class="status-badge status-badge-live">
               <span class="status-badge-dot"></span>
               Live

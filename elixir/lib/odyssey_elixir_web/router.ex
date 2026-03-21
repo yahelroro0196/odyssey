@@ -25,6 +25,7 @@ defmodule OdysseyElixirWeb.Router do
     pipe_through(:browser)
 
     live("/", DashboardLive, :index)
+    live("/tmux", TmuxLive, :index)
     live("/issues/:issue_identifier", ChatLive, :show)
   end
 

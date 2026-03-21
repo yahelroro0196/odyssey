@@ -39,7 +39,8 @@ defmodule OdysseyElixir.MixProject do
           OdysseyElixirWeb.Router.Helpers,
           OdysseyElixir.EventStore,
           OdysseyElixir.Notifier,
-          OdysseyElixirWeb.ChatLive
+          OdysseyElixirWeb.ChatLive,
+          OdysseyElixirWeb.TmuxLive
         ]
       ],
       test_ignore_filters: [
