@@ -21,6 +21,7 @@ defmodule SymphonyElixir.Workspace do
       with {:ok, workspace} <- workspace_path_for_issue(safe_id, worker_host),
            :ok <- validate_workspace_path(workspace, worker_host),
            {:ok, workspace, created?} <- ensure_workspace(workspace, worker_host),
+           :ok <- maybe_create_worktree(workspace, issue_context, created?, worker_host),
            :ok <- maybe_run_after_create_hook(workspace, issue_context, created?, worker_host) do
         {:ok, workspace}
       end
@@ -94,6 +95,7 @@ defmodule SymphonyElixir.Workspace do
         case validate_workspace_path(workspace, nil) do
           :ok ->
             maybe_run_before_remove_hook(workspace, nil)
+            maybe_remove_worktree(workspace)
             File.rm_rf(workspace)
 
           {:error, reason} ->
@@ -205,6 +207,46 @@ defmodule SymphonyElixir.Workspace do
 
   defp safe_identifier(identifier) do
     String.replace(identifier || "issue", ~r/[^a-zA-Z0-9._-]/, "_")
+  end
+
+  defp maybe_create_worktree(_workspace, _issue_context, false, _worker_host), do: :ok
+  defp maybe_create_worktree(_workspace, _issue_context, _created?, worker_host) when is_binary(worker_host), do: :ok
+
+  defp maybe_create_worktree(workspace, issue_context, true, nil) do
+    case Config.settings!().workspace.source_repo do
+      nil -> :ok
+      source_repo -> create_worktree(source_repo, workspace, "symphony/#{issue_context.issue_identifier}")
+    end
+  end
+
+  defp create_worktree(source_repo, workspace, branch_name) do
+    File.rmdir(workspace)
+    System.cmd("git", ["-C", source_repo, "fetch", "origin"], stderr_to_stdout: true)
+
+    case System.cmd("git", ["-C", source_repo, "worktree", "add", "-b", branch_name, workspace, "origin/main"], stderr_to_stdout: true) do
+      {_output, 0} ->
+        :ok
+
+      {_output, _status} ->
+        System.cmd("git", ["-C", source_repo, "branch", "-D", branch_name], stderr_to_stdout: true)
+
+        case System.cmd("git", ["-C", source_repo, "worktree", "add", "-b", branch_name, workspace, "origin/main"], stderr_to_stdout: true) do
+          {_output, 0} -> :ok
+          {output, status} -> {:error, {:worktree_add_failed, status, output}}
+        end
+    end
+  end
+
+  defp maybe_remove_worktree(workspace) do
+    case Config.settings!().workspace.source_repo do
+      nil ->
+        :ok
+
+      source_repo ->
+        System.cmd("git", ["-C", source_repo, "worktree", "remove", "--force", workspace], stderr_to_stdout: true)
+
+        :ok
+    end
   end
 
   defp maybe_run_after_create_hook(workspace, issue_context, created?, worker_host) do
