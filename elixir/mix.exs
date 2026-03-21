@@ -1,9 +1,9 @@
-defmodule SymphonyElixir.MixProject do
+defmodule OdysseyElixir.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :symphony_elixir,
+      app: :odyssey_elixir,
       version: "0.1.0",
       elixir: "~> 1.19",
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
@@ -13,32 +13,32 @@ defmodule SymphonyElixir.MixProject do
           threshold: 100
         ],
         ignore_modules: [
-          SymphonyElixir.Config,
-          SymphonyElixir.Linear.Client,
-          SymphonyElixir.SpecsCheck,
-          SymphonyElixir.Orchestrator,
-          SymphonyElixir.Orchestrator.State,
-          SymphonyElixir.AgentRunner,
-          SymphonyElixir.CLI,
-          SymphonyElixir.Codex.AppServer,
-          SymphonyElixir.Codex.DynamicTool,
-          SymphonyElixir.HttpServer,
-          SymphonyElixir.StatusDashboard,
-          SymphonyElixir.LogFile,
-          SymphonyElixir.Workspace,
-          SymphonyElixirWeb.DashboardLive,
-          SymphonyElixirWeb.Endpoint,
-          SymphonyElixirWeb.ErrorHTML,
-          SymphonyElixirWeb.ErrorJSON,
-          SymphonyElixirWeb.Layouts,
-          SymphonyElixirWeb.ObservabilityApiController,
-          SymphonyElixirWeb.Presenter,
-          SymphonyElixirWeb.StaticAssetController,
-          SymphonyElixirWeb.StaticAssets,
-          SymphonyElixirWeb.Router,
-          SymphonyElixirWeb.Router.Helpers,
-          SymphonyElixir.EventStore,
-          SymphonyElixirWeb.ChatLive
+          OdysseyElixir.Config,
+          OdysseyElixir.Linear.Client,
+          OdysseyElixir.SpecsCheck,
+          OdysseyElixir.Orchestrator,
+          OdysseyElixir.Orchestrator.State,
+          OdysseyElixir.AgentRunner,
+          OdysseyElixir.CLI,
+          OdysseyElixir.Codex.AppServer,
+          OdysseyElixir.Codex.DynamicTool,
+          OdysseyElixir.HttpServer,
+          OdysseyElixir.StatusDashboard,
+          OdysseyElixir.LogFile,
+          OdysseyElixir.Workspace,
+          OdysseyElixirWeb.DashboardLive,
+          OdysseyElixirWeb.Endpoint,
+          OdysseyElixirWeb.ErrorHTML,
+          OdysseyElixirWeb.ErrorJSON,
+          OdysseyElixirWeb.Layouts,
+          OdysseyElixirWeb.ObservabilityApiController,
+          OdysseyElixirWeb.Presenter,
+          OdysseyElixirWeb.StaticAssetController,
+          OdysseyElixirWeb.StaticAssets,
+          OdysseyElixirWeb.Router,
+          OdysseyElixirWeb.Router.Helpers,
+          OdysseyElixir.EventStore,
+          OdysseyElixirWeb.ChatLive
         ]
       ],
       test_ignore_filters: [
@@ -57,7 +57,7 @@ defmodule SymphonyElixir.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      mod: {SymphonyElixir.Application, []},
+      mod: {OdysseyElixir.Application, []},
       extra_applications: [:logger]
     ]
   end
@@ -92,9 +92,9 @@ defmodule SymphonyElixir.MixProject do
   defp escript do
     [
       app: nil,
-      main_module: SymphonyElixir.CLI,
-      name: "symphony",
-      path: "bin/symphony"
+      main_module: OdysseyElixir.CLI,
+      name: "odyssey",
+      path: "bin/odyssey"
     ]
   end
 end

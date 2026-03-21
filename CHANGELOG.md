@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Symphony are documented in this file.
+All notable changes to Odyssey are documented in this file.
 
 ## Unreleased
 
@@ -19,7 +19,7 @@ All notable changes to Symphony are documented in this file.
 
 ### Changed
 
-- SSH worker support added to Symphony Elixir.
+- SSH worker support added to Odyssey Elixir.
 - Stabilized orchestration and policy handling.
 - Aligned workflow config spec with schema behavior.
 - Refactored config access around an Ecto schema.
