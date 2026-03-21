@@ -5,6 +5,7 @@ tracker:
   active_states:
     - Todo
     - In Progress
+    - AI Review
     - Merging
     - Rework
   terminal_states:
@@ -38,6 +39,42 @@ codex:
   max_tokens_per_agent: 500000
   turn_sandbox_policy:
     type: workspaceWrite
+review_agent:
+  enabled: true
+  command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=high --model gpt-5.4-mini app-server
+  state_name: AI Review
+  max_tokens_per_agent: 200000
+  approval_policy: never
+  thread_sandbox: workspace-write
+  prompt: |
+    You are a code review agent for Linear ticket `{{ issue.identifier }}`.
+
+    Issue: {{ issue.identifier }} — {{ issue.title }}
+    Status: {{ issue.state }}
+    URL: {{ issue.url }}
+
+    {% if issue.description %}
+    Description:
+    {{ issue.description }}
+    {% endif %}
+
+    ## Your Task
+
+    Review the pull request for this issue:
+
+    1. Find the PR attached to this issue (check `gh pr list --head` or issue attachments).
+    2. Review the diff against `origin/main` using `gh pr diff` or `git diff origin/main...HEAD`.
+    3. Focus on: correctness, bugs, missing tests, security issues. Ignore style nitpicks.
+    4. Post your review on the GitHub PR.
+    5. Binary decision:
+       - **APPROVE**: Run `gh pr review --approve -b "<summary>"` and move the issue to `Merging` state.
+       - **REQUEST_CHANGES**: Run `gh pr review --request-changes -b "<feedback>"` and move the issue back to `In Progress` state.
+
+    ## Rules
+    - This is an unattended session. Never ask a human for follow-up actions.
+    - Be pragmatic: only request changes for real issues.
+    - Always post a substantive review comment explaining your reasoning.
+    - Use the `linear_graphql` tool or `update_issue` to transition the issue state.
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
@@ -109,10 +146,11 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 
 - `Backlog` -> out of scope for this workflow; do not modify.
 - `Todo` -> queued; immediately transition to `In Progress` before active work.
-  - Special case: if a PR is already attached, treat as feedback/rework loop (run full PR feedback sweep, address or explicitly push back, revalidate, return to `Human Review`).
+  - Special case: if a PR is already attached, treat as feedback/rework loop (run full PR feedback sweep, address or explicitly push back, revalidate, return to `AI Review`).
 - `In Progress` -> implementation actively underway.
-- `Human Review` -> PR is attached and validated; waiting on human approval.
-- `Merging` -> approved by human; execute the `land` skill flow (do not call `gh pr merge` directly).
+- `AI Review` -> PR is under automated code review; do not intervene. A review agent will approve or request changes.
+- `Human Review` -> PR is attached and validated; waiting on human approval. Only used for true blockers.
+- `Merging` -> approved by reviewer; execute the `land` skill flow (do not call `gh pr merge` directly).
 - `Rework` -> reviewer requested changes; planning + implementation required.
 - `Done` -> terminal state; no further action required.
 
@@ -235,7 +273,7 @@ Use this only when completion is blocked by missing required tools or missing au
     - Confirm every required ticket-provided validation/test-plan item is explicitly marked complete in the workpad.
     - Repeat this check-address-verify loop until no outstanding comments remain and checks are fully passing.
     - Re-open and refresh the workpad before state transition so `Plan`, `Acceptance Criteria`, and `Validation` exactly match completed work.
-12. Only then move issue to `Human Review`.
+12. Only then move issue to `AI Review`.
     - Exception: if blocked by missing required non-GitHub tools/auth per the blocked-access escape hatch, move to `Human Review` with the blocker brief and explicit unblock actions.
 13. For `Todo` tickets that already had a PR attached at kickoff:
     - Ensure all existing PR feedback was reviewed and resolved, including inline review comments (code changes or explicit, justified pushback response).
@@ -263,7 +301,7 @@ Use this only when completion is blocked by missing required tools or missing au
    - Create a new bootstrap `## Codex Workpad` comment.
    - Build a fresh plan/checklist and execute end-to-end.
 
-## Completion bar before Human Review
+## Completion bar before AI Review
 
 - Branch is rebased on latest `origin/main` with no merge conflicts; all checks pass after the rebase. If conflicts exist, resolve them, commit, push, and rerun checks before proceeding.
 - Step 1/2 checklist is fully complete and accurately reflected in the single workpad comment.
@@ -288,7 +326,7 @@ Use this only when completion is blocked by missing required tools or missing au
   title/description/acceptance criteria, same-project assignment, a `related`
   link to the current issue, and `blockedBy` when the follow-up depends on the
   current issue.
-- Do not move to `Human Review` unless the `Completion bar before Human Review` is satisfied.
+- Do not move to `Human Review` unless the `Completion bar before AI Review` is satisfied.
 - In `Human Review`, do not make changes; wait and poll.
 - If state is terminal (`Done`), do nothing and shut down.
 - Keep issue text concise, specific, and reviewer-oriented.
