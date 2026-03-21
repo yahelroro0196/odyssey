@@ -17,9 +17,9 @@ polling:
   interval_ms: 5000
 workspace:
   root: ~/code/symphony-workspaces
+  source_repo: ~/code/symphony
 hooks:
   after_create: |
-    git clone --depth 1 https://github.com/openai/symphony .
     if command -v mise >/dev/null 2>&1; then
       cd elixir && mise trust && mise exec -- mix deps.get
     fi
