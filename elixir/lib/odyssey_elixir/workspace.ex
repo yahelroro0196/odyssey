@@ -222,6 +222,7 @@ defmodule OdysseyElixir.Workspace do
   defp create_worktree(source_repo, workspace, branch_name) do
     File.rmdir(workspace)
     System.cmd("git", ["-C", source_repo, "fetch", "origin"], stderr_to_stdout: true)
+    System.cmd("git", ["-C", source_repo, "branch", "-f", "main", "origin/main"], stderr_to_stdout: true)
 
     case System.cmd("git", ["-C", source_repo, "worktree", "add", "-b", branch_name, workspace, "origin/main"], stderr_to_stdout: true) do
       {_output, 0} ->
