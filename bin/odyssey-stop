@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ODYSSEY_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(git -C "$ODYSSEY_ROOT" rev-parse --show-superproject-working-tree 2>/dev/null || echo "$ODYSSEY_ROOT")"
+PID_FILE="${REPO_ROOT}/.odyssey.pid"
+
+if [ ! -f "$PID_FILE" ]; then
+  echo "Odyssey is not running (no PID file)."
+  exit 0
+fi
+
+PID=$(cat "$PID_FILE")
+
+if ! kill -0 "$PID" 2>/dev/null; then
+  echo "Odyssey process (PID $PID) already exited. Cleaning up."
+  rm -f "$PID_FILE"
+  exit 0
+fi
+
+echo "Stopping Odyssey (PID $PID)..."
+kill "$PID"
+
+for _ in $(seq 1 10); do
+  if ! kill -0 "$PID" 2>/dev/null; then
+    echo "Stopped."
+    rm -f "$PID_FILE"
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "Force killing..."
+kill -9 "$PID" 2>/dev/null || true
+rm -f "$PID_FILE"
+echo "Stopped."

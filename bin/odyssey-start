@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ODYSSEY_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ODYSSEY_ELIXIR="${ODYSSEY_ROOT}/elixir"
+REPO_ROOT="$(git -C "$ODYSSEY_ROOT" rev-parse --show-superproject-working-tree 2>/dev/null || echo "$ODYSSEY_ROOT")"
+PID_FILE="${REPO_ROOT}/.odyssey.pid"
+PORT="${ODYSSEY_PORT:-4000}"
+WORKFLOW="${ODYSSEY_WORKFLOW:-${REPO_ROOT}/WORKFLOW.md}"
+LOG_DIR="${REPO_ROOT}/log"
+BACKGROUND=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --port) PORT="$2"; shift 2 ;;
+    --workflow) WORKFLOW="$2"; shift 2 ;;
+    --background|-d) BACKGROUND=true; shift ;;
+    --logs-root) LOG_DIR="$2"; shift 2 ;;
+    --help|-h)
+      echo "Usage: odyssey-start [OPTIONS]"
+      echo ""
+      echo "Options:"
+      echo "  --workflow <path>   Path to WORKFLOW.md (default: REPO_ROOT/WORKFLOW.md)"
+      echo "  --port <N>          Dashboard port (default: 4000)"
+      echo "  --background, -d    Run as background daemon"
+      echo "  --logs-root <path>  Log directory (default: REPO_ROOT/log)"
+      exit 0 ;;
+    *) echo "Unknown option: $1 (try --help)"; exit 1 ;;
+  esac
+done
+
+if [ ! -f "$WORKFLOW" ]; then
+  echo "Error: WORKFLOW.md not found at ${WORKFLOW}"
+  echo "Create one or use --workflow <path>"
+  exit 1
+fi
+
+# Build if needed
+if [ ! -f "${ODYSSEY_ELIXIR}/bin/odyssey" ]; then
+  echo "Building Odyssey..."
+  cd "$ODYSSEY_ELIXIR"
+  if command -v mise &>/dev/null; then
+    mise trust 2>/dev/null || true
+    mise exec -- mix deps.get --quiet
+    mise exec -- mix build
+  else
+    mix deps.get --quiet
+    mix build
+  fi
+  cd "$REPO_ROOT"
+fi
+
+# Check already running
+if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  echo "Odyssey already running (PID $(cat "$PID_FILE"))."
+  echo "Stop first: $(dirname "$0")/odyssey-stop"
+  exit 1
+fi
+
+echo "Starting Odyssey..."
+echo "  Dashboard: http://localhost:${PORT}"
+echo "  Workflow:  ${WORKFLOW}"
+
+ODYSSEY_BIN="${ODYSSEY_ELIXIR}/bin/odyssey"
+ODYSSEY_ARGS="${WORKFLOW} --port ${PORT} --i-understand-that-this-will-be-running-without-the-usual-guardrails"
+
+if [ "$BACKGROUND" = true ]; then
+  mkdir -p "$LOG_DIR"
+  LOG_FILE="${LOG_DIR}/odyssey.log"
+  nohup "$ODYSSEY_BIN" $ODYSSEY_ARGS > "$LOG_FILE" 2>&1 &
+  echo $! > "$PID_FILE"
+  echo "  PID:       $! (background)"
+  echo "  Log:       ${LOG_FILE}"
+else
+  exec "$ODYSSEY_BIN" $ODYSSEY_ARGS
+fi
