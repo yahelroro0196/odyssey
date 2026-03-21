@@ -91,6 +91,47 @@ defmodule OdysseyElixir.Config do
     end
   end
 
+  @spec agent_role_for_state(String.t()) :: :coder | :review
+  def agent_role_for_state(state_name) when is_binary(state_name) do
+    s = settings!()
+
+    if s.review_agent.enabled do
+      review_state = Schema.normalize_issue_state(s.review_agent.state_name || "ai review")
+      if Schema.normalize_issue_state(state_name) == review_state, do: :review, else: :coder
+    else
+      :coder
+    end
+  end
+
+  def agent_role_for_state(_state_name), do: :coder
+
+  @spec agent_codex_config(:coder | :review) :: map()
+  def agent_codex_config(:review), do: settings!().review_agent
+  def agent_codex_config(_role), do: settings!().codex
+
+  @default_review_prompt """
+  You are a code review agent for Linear ticket `{{ issue.identifier }}`.
+
+  Issue: {{ issue.identifier }} — {{ issue.title }}
+  URL: {{ issue.url }}
+
+  Review the pull request for this issue. Check out the PR branch, review the diff against origin/main, and post your review on GitHub.
+
+  Focus on: correctness, bugs, test coverage, security issues. Ignore style nitpicks.
+
+  Decision:
+  - APPROVE: `gh pr review --approve -b "LGTM"` then move issue to Merging.
+  - REQUEST_CHANGES: `gh pr review --request-changes -b "<feedback>"` then move issue to In Progress.
+  """
+
+  @spec review_agent_prompt() :: String.t()
+  def review_agent_prompt do
+    case settings!().review_agent.prompt do
+      prompt when is_binary(prompt) and prompt != "" -> prompt
+      _ -> @default_review_prompt
+    end
+  end
+
   @spec validate!() :: :ok | {:error, term()}
   def validate! do
     with {:ok, settings} <- settings() do

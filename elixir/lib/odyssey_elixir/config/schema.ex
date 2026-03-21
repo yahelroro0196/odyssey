@@ -245,6 +245,59 @@ defmodule OdysseyElixir.Config.Schema do
     end
   end
 
+  defmodule ReviewAgent do
+    @moduledoc false
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @primary_key false
+    embedded_schema do
+      field(:enabled, :boolean, default: false)
+      field(:command, :string, default: "codex app-server")
+      field(:prompt, :string)
+      field(:state_name, :string, default: "AI Review")
+
+      field(:approval_policy, StringOrMap,
+        default: %{
+          "reject" => %{
+            "sandbox_approval" => true,
+            "rules" => true,
+            "mcp_elicitations" => true
+          }
+        }
+      )
+
+      field(:thread_sandbox, :string, default: "workspace-write")
+      field(:turn_sandbox_policy, :map)
+      field(:turn_timeout_ms, :integer, default: 3_600_000)
+      field(:read_timeout_ms, :integer, default: 5_000)
+      field(:stall_timeout_ms, :integer, default: 300_000)
+      field(:max_tokens_per_agent, :integer)
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(
+        attrs,
+        [
+          :enabled,
+          :command,
+          :prompt,
+          :state_name,
+          :approval_policy,
+          :thread_sandbox,
+          :turn_sandbox_policy,
+          :turn_timeout_ms,
+          :read_timeout_ms,
+          :stall_timeout_ms,
+          :max_tokens_per_agent
+        ],
+        empty_values: []
+      )
+    end
+  end
+
   defmodule Notifications do
     @moduledoc false
     use Ecto.Schema
@@ -292,6 +345,7 @@ defmodule OdysseyElixir.Config.Schema do
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
     embeds_one(:notifications, Notifications, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:review_agent, ReviewAgent, on_replace: :update, defaults_to_struct: true)
   end
 
   @spec parse(map()) :: {:ok, %__MODULE__{}} | {:error, {:invalid_workflow_config, String.t()}}
@@ -384,6 +438,8 @@ defmodule OdysseyElixir.Config.Schema do
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:server, with: &Server.changeset/2)
+    |> cast_embed(:notifications, with: &Notifications.changeset/2)
+    |> cast_embed(:review_agent, with: &ReviewAgent.changeset/2)
   end
 
   defp finalize_settings(settings) do
@@ -405,7 +461,13 @@ defmodule OdysseyElixir.Config.Schema do
         turn_sandbox_policy: normalize_optional_map(settings.codex.turn_sandbox_policy)
     }
 
-    %{settings | tracker: tracker, workspace: workspace, codex: codex}
+    review_agent = %{
+      settings.review_agent
+      | approval_policy: normalize_keys(settings.review_agent.approval_policy),
+        turn_sandbox_policy: normalize_optional_map(settings.review_agent.turn_sandbox_policy)
+    }
+
+    %{settings | tracker: tracker, workspace: workspace, codex: codex, review_agent: review_agent}
   end
 
   defp normalize_keys(value) when is_map(value) do
