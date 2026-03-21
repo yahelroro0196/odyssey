@@ -468,6 +468,24 @@ pre,
   }
 }
 
+.role-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.role-badge-coder {
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.role-badge-review {
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
 .cancel-button {
   padding: 0.2rem 0.6rem;
   border-radius: 6px;

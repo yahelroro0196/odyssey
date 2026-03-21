@@ -147,7 +147,8 @@ defmodule OdysseyElixirWeb.DashboardLive do
             <div class="table-wrap">
               <table class="data-table data-table-running">
                 <colgroup>
-                  <col style="width: 12rem;" />
+                  <col style="width: 10rem;" />
+                  <col style="width: 6rem;" />
                   <col style="width: 8rem;" />
                   <col style="width: 5rem;" />
                   <col style="width: 7.5rem;" />
@@ -159,6 +160,7 @@ defmodule OdysseyElixirWeb.DashboardLive do
                 <thead>
                   <tr>
                     <th>Issue</th>
+                    <th>Role</th>
                     <th>State</th>
                     <th>PR</th>
                     <th>Session</th>
@@ -175,6 +177,11 @@ defmodule OdysseyElixirWeb.DashboardLive do
                         <a class="issue-id issue-link-clickable" href={"/issues/#{entry.issue_identifier}"}><%= entry.issue_identifier %></a>
                         <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
                       </div>
+                    </td>
+                    <td>
+                      <span class={role_badge_class(entry.role)}>
+                        <%= role_label(entry.role) %>
+                      </span>
                     </td>
                     <td>
                       <span class={state_badge_class(entry.state)}>
@@ -344,6 +351,12 @@ defmodule OdysseyElixirWeb.DashboardLive do
   end
 
   defp format_int(_value), do: "n/a"
+
+  defp role_badge_class(:review), do: "role-badge role-badge-review"
+  defp role_badge_class(_), do: "role-badge role-badge-coder"
+
+  defp role_label(:review), do: "Reviewer"
+  defp role_label(_), do: "Coder"
 
   defp state_badge_class(state) do
     base = "state-badge"

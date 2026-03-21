@@ -130,7 +130,8 @@ defmodule OdysseyElixirWeb.Presenter do
         output_tokens: entry.codex_output_tokens,
         total_tokens: entry.codex_total_tokens
       },
-      pr_url: Map.get(entry, :pr_url)
+      pr_url: Map.get(entry, :pr_url),
+      role: Map.get(entry, :role, :coder)
     }
   end
 

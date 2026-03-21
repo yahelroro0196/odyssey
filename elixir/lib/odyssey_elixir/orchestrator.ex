@@ -1149,6 +1149,7 @@ defmodule OdysseyElixir.Orchestrator do
           last_codex_message: metadata.last_codex_message,
           last_codex_event: metadata.last_codex_event,
           pr_url: Map.get(metadata, :pr_url),
+          role: Map.get(metadata, :role, :coder),
           runtime_seconds: running_seconds(metadata.started_at, now)
         }
       end)
