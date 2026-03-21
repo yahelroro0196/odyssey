@@ -25,6 +25,23 @@ defmodule OdysseyElixir.PromptBuilder do
     |> IO.iodata_to_binary()
   end
 
+  @spec build_review_prompt(OdysseyElixir.Linear.Issue.t(), keyword()) :: String.t()
+  def build_review_prompt(issue, opts \\ []) do
+    template =
+      Config.review_agent_prompt()
+      |> parse_template!()
+
+    template
+    |> Solid.render!(
+      %{
+        "attempt" => Keyword.get(opts, :attempt),
+        "issue" => issue |> Map.from_struct() |> to_solid_map()
+      },
+      @render_opts
+    )
+    |> IO.iodata_to_binary()
+  end
+
   defp prompt_template!({:ok, %{prompt_template: prompt}}), do: default_prompt(prompt)
 
   defp prompt_template!({:error, reason}) do

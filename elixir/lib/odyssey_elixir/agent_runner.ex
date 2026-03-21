@@ -80,7 +80,9 @@ defmodule OdysseyElixir.AgentRunner do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
 
-    with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host) do
+    role = Keyword.get(opts, :role, :coder)
+
+    with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host, role: role) do
       try do
         do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
       after
@@ -130,7 +132,12 @@ defmodule OdysseyElixir.AgentRunner do
     end
   end
 
-  defp build_turn_prompt(issue, opts, 1, _max_turns), do: PromptBuilder.build_prompt(issue, opts)
+  defp build_turn_prompt(issue, opts, 1, _max_turns) do
+    case Keyword.get(opts, :role, :coder) do
+      :review -> PromptBuilder.build_review_prompt(issue, opts)
+      _ -> PromptBuilder.build_prompt(issue, opts)
+    end
+  end
 
   defp build_turn_prompt(_issue, _opts, turn_number, max_turns) do
     """
