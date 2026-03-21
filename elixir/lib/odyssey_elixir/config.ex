@@ -115,13 +115,13 @@ defmodule OdysseyElixir.Config do
   Issue: {{ issue.identifier }} — {{ issue.title }}
   URL: {{ issue.url }}
 
-  Review the pull request for this issue. Check out the PR branch, review the diff against origin/main, and post your review on GitHub.
+  Review the pull request for this issue. Check out the PR branch, review the diff against origin/main, and post your findings as a PR comment.
 
   Focus on: correctness, bugs, test coverage, security issues. Ignore style nitpicks.
 
   Decision:
-  - APPROVE: `gh pr review --approve -b "LGTM"` then move issue to Merging.
-  - REQUEST_CHANGES: `gh pr review --request-changes -b "<feedback>"` then move issue to In Progress.
+  - APPROVE: `gh pr comment -b "LGTM: <summary>"` then move issue to Merging. Do NOT use `gh pr review --approve`.
+  - REQUEST_CHANGES: `gh pr comment -b "Changes needed: <feedback>"` then move issue to In Progress.
   """
 
   @spec review_agent_prompt() :: String.t()

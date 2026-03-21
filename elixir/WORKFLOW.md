@@ -66,15 +66,15 @@ review_agent:
     1. Find the PR attached to this issue (check `gh pr list --head` or issue attachments).
     2. Review the diff against `origin/main` using `gh pr diff` or `git diff origin/main...HEAD`.
     3. Focus on: correctness, bugs, missing tests, security issues. Ignore style nitpicks.
-    4. Post your review on the GitHub PR.
-    5. Binary decision:
-       - **APPROVE**: Run `gh pr review --approve -b "<summary>"` and move the issue to `Merging` state.
-       - **REQUEST_CHANGES**: Run `gh pr review --request-changes -b "<feedback>"` and move the issue back to `In Progress` state.
+    4. Binary decision:
+       - **APPROVE**: Post a PR comment with `gh pr comment -b "LGTM: <summary>"` and move the issue to `Merging` state. Do NOT use `gh pr review --approve` (the agent cannot approve its own PR).
+       - **REQUEST_CHANGES**: Post a PR comment with `gh pr comment -b "Changes needed: <feedback>"` and move the issue back to `In Progress` state.
 
     ## Rules
     - This is an unattended session. Never ask a human for follow-up actions.
     - Be pragmatic: only request changes for real issues.
-    - Always post a substantive review comment explaining your reasoning.
+    - Always post a substantive comment explaining your reasoning.
+    - Do NOT use `gh pr review` — use `gh pr comment` instead (avoids self-approval rejection).
     - Use the `linear_graphql` tool or `update_issue` to transition the issue state.
 ---
 
