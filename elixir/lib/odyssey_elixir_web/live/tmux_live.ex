@@ -243,8 +243,12 @@ defmodule OdysseyElixirWeb.TmuxLive do
 
   # ── Event processing (same logic as ChatLive) ──
 
+  @max_pane_items 50
+
   defp build_items(events) do
-    Enum.reduce(events, [], fn event, items -> append_event(items, event) end)
+    events
+    |> Enum.reduce([], fn event, items -> append_event(items, event) end)
+    |> trim_items()
   end
 
   defp append_event(items, event) do
@@ -253,9 +257,12 @@ defmodule OdysseyElixirWeb.TmuxLive do
     cond do
       MapSet.member?(@hidden_methods, method) -> items
       MapSet.member?(@delta_methods, method) -> merge_delta(items, event, method)
-      true -> items ++ [classify_event(event, method)]
+      true -> (items ++ [classify_event(event, method)]) |> trim_items()
     end
   end
+
+  defp trim_items(items) when length(items) > @max_pane_items, do: Enum.drop(items, length(items) - @max_pane_items)
+  defp trim_items(items), do: items
 
   defp merge_delta(items, event, method) do
     delta_text = extract_delta_text(event)
@@ -307,13 +314,8 @@ defmodule OdysseyElixirWeb.TmuxLive do
   # ── Payload extraction ──
 
   defp extract_method(event) do
-    payload = event[:payload]
-
-    cond do
-      is_map(payload) -> Map.get(payload, "method") || Map.get(payload, :method)
-      is_binary(event[:raw]) -> extract_method_from_raw(event[:raw])
-      true -> nil
-    end
+    (is_binary(event[:raw]) && extract_method_from_raw(event[:raw])) ||
+      extract_method_from_payload(event[:payload])
   end
 
   defp extract_method_from_raw(raw) do
@@ -323,9 +325,18 @@ defmodule OdysseyElixirWeb.TmuxLive do
     end
   end
 
+  defp extract_method_from_payload(payload) when is_map(payload) do
+    Map.get(payload, "method") || Map.get(payload, :method)
+  end
+
+  defp extract_method_from_payload(_), do: nil
+
+  defp parsed_event(event) do
+    decode_raw(event[:raw]) || event[:payload] || %{}
+  end
+
   defp extract_delta_text(event) do
-    payload = event[:payload] || decode_raw(event[:raw])
-    params = map_get_any(payload, ["params", :params]) || %{}
+    params = map_get_any(parsed_event(event), ["params", :params]) || %{}
 
     map_get_any(params, ["delta", :delta]) ||
       map_get_any(params, ["textDelta", :textDelta]) ||
@@ -335,28 +346,24 @@ defmodule OdysseyElixirWeb.TmuxLive do
   end
 
   defp extract_item_type(event) do
-    payload = event[:payload] || decode_raw(event[:raw])
-    params = map_get_any(payload, ["params", :params]) || %{}
+    params = map_get_any(parsed_event(event), ["params", :params]) || %{}
     item = map_get_any(params, ["item", :item]) || map_get_any(params, ["msg", :msg]) || %{}
     map_get_any(item, ["type", :type])
   end
 
   defp extract_item_status(event) do
-    payload = event[:payload] || decode_raw(event[:raw])
-    params = map_get_any(payload, ["params", :params]) || %{}
+    params = map_get_any(parsed_event(event), ["params", :params]) || %{}
     item = map_get_any(params, ["item", :item]) || %{}
     map_get_any(item, ["status", :status])
   end
 
   defp extract_command_text(event) do
-    payload = event[:payload] || decode_raw(event[:raw])
-    params = map_get_any(payload, ["params", :params]) || %{}
+    params = map_get_any(parsed_event(event), ["params", :params]) || %{}
     map_get_any(params, ["command", :command])
   end
 
   defp extract_tool_name(event) do
-    payload = event[:payload] || decode_raw(event[:raw])
-    params = map_get_any(payload, ["params", :params]) || %{}
+    params = map_get_any(parsed_event(event), ["params", :params]) || %{}
     map_get_any(params, ["tool", :tool]) || map_get_any(params, ["name", :name])
   end
 

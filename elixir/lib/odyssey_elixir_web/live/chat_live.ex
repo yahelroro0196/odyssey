@@ -334,13 +334,8 @@ defmodule OdysseyElixirWeb.ChatLive do
   # ── Payload extraction helpers ──
 
   defp extract_method(event) do
-    payload = event[:payload]
-
-    cond do
-      is_map(payload) -> Map.get(payload, "method") || Map.get(payload, :method)
-      is_binary(event[:raw]) -> extract_method_from_raw(event[:raw])
-      true -> nil
-    end
+    (is_binary(event[:raw]) && extract_method_from_raw(event[:raw])) ||
+      extract_method_from_payload(event[:payload])
   end
 
   defp extract_method_from_raw(raw) do
@@ -350,9 +345,18 @@ defmodule OdysseyElixirWeb.ChatLive do
     end
   end
 
+  defp extract_method_from_payload(payload) when is_map(payload) do
+    Map.get(payload, "method") || Map.get(payload, :method)
+  end
+
+  defp extract_method_from_payload(_), do: nil
+
+  defp parsed_event(event) do
+    decode_raw(event[:raw]) || event[:payload] || %{}
+  end
+
   defp extract_delta_text(event) do
-    payload = event[:payload] || decode_raw(event[:raw])
-    params = map_get_any(payload, ["params", :params]) || %{}
+    params = map_get_any(parsed_event(event), ["params", :params]) || %{}
 
     map_get_any(params, ["delta", :delta]) ||
       map_get_any(params, ["textDelta", :textDelta]) ||
@@ -362,34 +366,29 @@ defmodule OdysseyElixirWeb.ChatLive do
   end
 
   defp extract_item_type(event) do
-    payload = event[:payload] || decode_raw(event[:raw])
-    params = map_get_any(payload, ["params", :params]) || %{}
+    params = map_get_any(parsed_event(event), ["params", :params]) || %{}
     item = map_get_any(params, ["item", :item]) || map_get_any(params, ["msg", :msg]) || %{}
     map_get_any(item, ["type", :type])
   end
 
   defp extract_item_status(event) do
-    payload = event[:payload] || decode_raw(event[:raw])
-    params = map_get_any(payload, ["params", :params]) || %{}
+    params = map_get_any(parsed_event(event), ["params", :params]) || %{}
     item = map_get_any(params, ["item", :item]) || %{}
     map_get_any(item, ["status", :status])
   end
 
   defp extract_command_text(event) do
-    payload = event[:payload] || decode_raw(event[:raw])
-    params = map_get_any(payload, ["params", :params]) || %{}
+    params = map_get_any(parsed_event(event), ["params", :params]) || %{}
     map_get_any(params, ["command", :command])
   end
 
   defp extract_tool_name(event) do
-    payload = event[:payload] || decode_raw(event[:raw])
-    params = map_get_any(payload, ["params", :params]) || %{}
+    params = map_get_any(parsed_event(event), ["params", :params]) || %{}
     map_get_any(params, ["tool", :tool]) || map_get_any(params, ["name", :name])
   end
 
   defp describe_file_change(event) do
-    payload = event[:payload] || decode_raw(event[:raw])
-    params = map_get_any(payload, ["params", :params]) || %{}
+    params = map_get_any(parsed_event(event), ["params", :params]) || %{}
     count = map_get_any(params, ["fileChangeCount", :fileChangeCount]) || map_get_any(params, ["changeCount", :changeCount])
     if is_integer(count), do: "#{count} file change(s)", else: "file change"
   end
