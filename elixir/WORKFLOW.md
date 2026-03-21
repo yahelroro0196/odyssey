@@ -21,7 +21,10 @@ workspace:
 hooks:
   after_create: |
     if command -v mise >/dev/null 2>&1; then
-      cd elixir && mise trust && mise exec -- mix deps.get
+      cd elixir && mise trust
+      export MIX_DEPS_PATH="${HOME}/.cache/odyssey-deps"
+      export MIX_BUILD_PATH="${HOME}/.cache/odyssey-build"
+      mise exec -- mix deps.get
     fi
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
@@ -32,6 +35,7 @@ codex:
   command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=xhigh --model gpt-5.3-codex app-server
   approval_policy: never
   thread_sandbox: workspace-write
+  max_tokens_per_agent: 500000
   turn_sandbox_policy:
     type: workspaceWrite
 ---
