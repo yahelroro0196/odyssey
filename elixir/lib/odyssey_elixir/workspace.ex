@@ -195,6 +195,39 @@ defmodule OdysseyElixir.Workspace do
     end
   end
 
+  @spec cleanup_orphan_worktrees(MapSet.t()) :: :ok
+  def cleanup_orphan_worktrees(active_identifiers) do
+    settings = Config.settings!()
+
+    case settings.workspace.source_repo do
+      nil -> :ok
+      source_repo -> do_cleanup_orphans(source_repo, Path.expand(settings.workspace.root), active_identifiers)
+    end
+  end
+
+  defp do_cleanup_orphans(source_repo, root, active_identifiers) do
+    System.cmd("git", ["-C", source_repo, "worktree", "prune"], stderr_to_stdout: true)
+
+    case File.ls(root) do
+      {:ok, entries} -> Enum.each(entries, &maybe_remove_orphan(&1, root, source_repo, active_identifiers))
+      {:error, _} -> :ok
+    end
+  end
+
+  defp maybe_remove_orphan(entry, root, source_repo, active_identifiers) do
+    if MapSet.member?(active_identifiers, entry), do: :ok, else: remove_orphan(Path.join(root, entry), source_repo)
+  end
+
+  defp remove_orphan(path, source_repo) do
+    if File.dir?(path) do
+      Logger.info("GC removing orphan worktree path=#{path}")
+      System.cmd("git", ["-C", source_repo, "worktree", "remove", "--force", path], stderr_to_stdout: true)
+      File.rm_rf(path)
+    end
+
+    :ok
+  end
+
   defp workspace_path_for_issue(safe_id, nil) when is_binary(safe_id) do
     Config.settings!().workspace.root
     |> Path.join(safe_id)
