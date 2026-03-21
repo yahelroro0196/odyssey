@@ -1,14 +1,33 @@
 defmodule OdysseyElixirWeb.ChatLive do
   @moduledoc """
-  Full-screen LiveView for viewing a running agent's event stream.
+  Full-screen LiveView for viewing a running agent's event stream as a conversation.
   """
 
   use Phoenix.LiveView, layout: {OdysseyElixirWeb.Layouts, :app}
 
-  alias OdysseyElixir.{EventStore, StatusDashboard}
+  alias OdysseyElixir.EventStore
   alias OdysseyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
 
   @runtime_tick_ms 1_000
+
+  # Methods that are noise — never shown
+  @hidden_methods MapSet.new([
+                    "thread/tokenUsage/updated",
+                    "account/rateLimits/updated",
+                    "account/updated",
+                    "account/chatgptAuthTokens/refresh"
+                  ])
+
+  # Streaming delta methods — aggregated into the parent item
+  @delta_methods MapSet.new([
+                   "item/agentMessage/delta",
+                   "item/reasoning/textDelta",
+                   "item/reasoning/summaryTextDelta",
+                   "item/reasoning/summaryPartAdded",
+                   "item/commandExecution/outputDelta",
+                   "item/fileChange/outputDelta",
+                   "item/plan/delta"
+                 ])
 
   @impl true
   def mount(%{"issue_identifier" => issue_identifier}, _session, socket) do
@@ -28,13 +47,13 @@ defmodule OdysseyElixirWeb.ChatLive do
           schedule_runtime_tick()
         end
 
-        events = EventStore.events(issue_id)
+        raw_events = EventStore.events(issue_id)
 
         socket =
           socket
           |> assign(:issue_id, issue_id)
           |> assign(:agent_info, agent_info)
-          |> assign(:events, events)
+          |> assign(:items, build_items(raw_events))
 
         {:ok, socket}
 
@@ -43,7 +62,7 @@ defmodule OdysseyElixirWeb.ChatLive do
           socket
           |> assign(:issue_id, nil)
           |> assign(:agent_info, nil)
-          |> assign(:events, [])
+          |> assign(:items, [])
 
         {:ok, socket}
     end
@@ -52,7 +71,7 @@ defmodule OdysseyElixirWeb.ChatLive do
   @impl true
   def handle_info({:agent_event, issue_id, event}, socket) do
     if socket.assigns.issue_id == issue_id do
-      {:noreply, assign(socket, :events, socket.assigns.events ++ [event])}
+      {:noreply, assign(socket, :items, append_event(socket.assigns.items, event))}
     else
       {:noreply, socket}
     end
@@ -121,27 +140,11 @@ defmodule OdysseyElixirWeb.ChatLive do
         <% end %>
 
         <div class="chat-stream" id="chat-stream" phx-hook="ChatScroll">
-          <%= if @events == [] do %>
-            <p class="chat-empty-events">No events yet.</p>
+          <%= if @items == [] do %>
+            <p class="chat-empty-events">Waiting for agent activity...</p>
           <% else %>
-            <div :for={{event, idx} <- Enum.with_index(@events)} class="chat-event" id={"event-#{idx}"}>
-              <div class="chat-event-header">
-                <span class={event_badge_class(event[:event])}>
-                  <%= event[:event] || "unknown" %>
-                </span>
-                <span class="chat-event-time mono numeric"><%= format_event_time(event[:timestamp]) %></span>
-              </div>
-              <div class="chat-event-body"><%= humanize_event(event) %></div>
-              <%= if event[:raw] || event[:payload] do %>
-                <button
-                  type="button"
-                  class="chat-event-toggle"
-                  onclick="var el=this.nextElementSibling;el.classList.toggle('chat-event-raw--open');this.textContent=el.classList.contains('chat-event-raw--open')?'Hide JSON':'Show JSON'"
-                >
-                  Show JSON
-                </button>
-                <pre class="chat-event-raw"><%= format_raw(event) %></pre>
-              <% end %>
+            <div :for={{item, idx} <- Enum.with_index(@items)} class={item_class(item)} id={"item-#{idx}"}>
+              <%= render_item(item, assigns) %>
             </div>
           <% end %>
         </div>
@@ -155,16 +158,12 @@ defmodule OdysseyElixirWeb.ChatLive do
         updated() { this.scrollToBottom(); },
         scrollToBottom() { this.el.scrollTop = this.el.scrollHeight; }
       };
-
-      // Re-create liveSocket with hooks if needed
       (function() {
         if (window.__chatHooksInstalled) return;
         window.__chatHooksInstalled = true;
-
         window.addEventListener("DOMContentLoaded", function() {
           if (!window.Phoenix || !window.LiveView) return;
           if (window.liveSocket) { window.liveSocket.disconnect(); }
-
           var csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
           var liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
             hooks: window.Hooks,
@@ -178,35 +177,255 @@ defmodule OdysseyElixirWeb.ChatLive do
     """
   end
 
-  defp humanize_event(event) do
-    StatusDashboard.humanize_codex_message(event)
+  defp render_item(%{type: :message} = item, _assigns) do
+    assigns = %{item: item}
+
+    ~H"""
+    <div class="chat-item-header">
+      <span class="chat-item-role">Agent</span>
+      <span class="chat-event-time mono numeric"><%= @item.time %></span>
+    </div>
+    <div class="chat-item-text"><%= @item.text %></div>
+    """
   end
 
-  defp format_event_time(%DateTime{} = dt) do
-    dt
-    |> DateTime.truncate(:second)
-    |> Calendar.strftime("%H:%M:%S")
+  defp render_item(%{type: :reasoning} = item, _assigns) do
+    assigns = %{item: item}
+
+    ~H"""
+    <details class="chat-reasoning-details">
+      <summary class="chat-reasoning-summary">
+        <span class="chat-item-role-muted">Thinking</span>
+        <span class="chat-event-time mono numeric"><%= @item.time %></span>
+      </summary>
+      <div class="chat-item-text chat-reasoning-text"><%= @item.text %></div>
+    </details>
+    """
   end
 
-  defp format_event_time(_), do: ""
+  defp render_item(%{type: :command} = item, _assigns) do
+    assigns = %{item: item}
 
-  defp format_raw(event) do
-    raw = event[:raw] || event[:payload]
+    ~H"""
+    <div class="chat-item-header">
+      <span class="chat-item-role-tool">Command</span>
+      <span class="chat-event-time mono numeric"><%= @item.time %></span>
+    </div>
+    <pre class="chat-command-text"><%= @item.text %></pre>
+    """
+  end
 
-    case raw do
-      s when is_binary(s) ->
-        case Jason.decode(s) do
-          {:ok, decoded} -> Jason.encode!(decoded, pretty: true)
-          _ -> s
-        end
+  defp render_item(%{type: :tool_call} = item, _assigns) do
+    assigns = %{item: item}
 
-      m when is_map(m) ->
-        Jason.encode!(m, pretty: true)
+    ~H"""
+    <div class="chat-item-header">
+      <span class="chat-item-role-tool">Tool</span>
+      <span class="chat-event-time mono numeric"><%= @item.time %></span>
+    </div>
+    <div class="chat-item-text"><%= @item.text %></div>
+    """
+  end
 
-      other ->
-        inspect(other, pretty: true, limit: :infinity)
+  defp render_item(%{type: :file_change} = item, _assigns) do
+    assigns = %{item: item}
+
+    ~H"""
+    <div class="chat-item-header">
+      <span class="chat-item-role-tool">File Change</span>
+      <span class="chat-event-time mono numeric"><%= @item.time %></span>
+    </div>
+    <div class="chat-item-text"><%= @item.text %></div>
+    """
+  end
+
+  defp render_item(%{type: :system} = item, _assigns) do
+    assigns = %{item: item}
+
+    ~H"""
+    <div class="chat-item-system">
+      <span class="chat-event-time mono numeric"><%= @item.time %></span>
+      <span><%= @item.text %></span>
+    </div>
+    """
+  end
+
+  defp render_item(%{type: :event} = item, _assigns) do
+    assigns = %{item: item}
+
+    ~H"""
+    <div class="chat-item-header">
+      <span class={event_badge_class(@item.event_type)}>
+        <%= @item.event_type || "event" %>
+      </span>
+      <span class="chat-event-time mono numeric"><%= @item.time %></span>
+    </div>
+    <div class="chat-item-text"><%= @item.text %></div>
+    """
+  end
+
+  # ── Event processing: convert raw events into conversation items ──
+
+  defp build_items(events) do
+    events
+    |> Enum.reduce([], fn event, items -> append_event(items, event) end)
+  end
+
+  defp append_event(items, event) do
+    method = extract_method(event)
+
+    cond do
+      MapSet.member?(@hidden_methods, method) -> items
+      MapSet.member?(@delta_methods, method) -> merge_delta(items, event, method)
+      true -> items ++ [classify_event(event, method)]
     end
   end
+
+  defp merge_delta(items, event, method) do
+    delta_text = extract_delta_text(event)
+
+    if delta_text == "" do
+      items
+    else
+      type = delta_type(method)
+
+      case List.last(items) do
+        %{type: ^type, open: true} = last ->
+          List.replace_at(items, -1, %{last | text: last.text <> delta_text})
+
+        _ ->
+          items ++ [%{type: type, text: delta_text, time: format_event_time(event[:timestamp]), open: true}]
+      end
+    end
+  end
+
+  defp classify_event(event, "item/started"), do: classify_item_started(event)
+  defp classify_event(event, "item/completed"), do: classify_item_completed(event)
+  defp classify_event(event, "item/commandExecution/requestApproval"), do: %{type: :command, text: extract_command_text(event) || "command execution", time: event_time(event)}
+  defp classify_event(event, "item/fileChange/requestApproval"), do: %{type: :file_change, text: describe_file_change(event), time: event_time(event)}
+  defp classify_event(event, "item/tool/call"), do: %{type: :tool_call, text: extract_tool_name(event) || "tool call", time: event_time(event)}
+  defp classify_event(event, "turn/completed"), do: %{type: :system, text: "Turn completed", time: event_time(event)}
+  defp classify_event(event, "turn/failed"), do: %{type: :system, text: "Turn failed", time: event_time(event)}
+  defp classify_event(event, "turn/started"), do: %{type: :system, text: "Turn started", time: event_time(event)}
+  defp classify_event(event, "turn/diff/updated"), do: %{type: :system, text: "Diff updated", time: event_time(event)}
+
+  defp classify_event(event, _method) do
+    text = OdysseyElixir.StatusDashboard.humanize_codex_message(event)
+    %{type: :event, text: text, time: event_time(event), event_type: event[:event]}
+  end
+
+  defp classify_item_started(event) do
+    case extract_item_type(event) do
+      "reasoning" -> %{type: :reasoning, text: "", time: event_time(event), open: true}
+      "message" -> %{type: :message, text: "", time: event_time(event), open: true}
+      other -> %{type: :system, text: "#{other || "item"} started", time: event_time(event)}
+    end
+  end
+
+  defp classify_item_completed(event) do
+    item_type = extract_item_type(event)
+    status = extract_item_status(event)
+    suffix = if status, do: " (#{status})", else: ""
+    %{type: :system, text: "#{item_type || "item"} completed#{suffix}", time: event_time(event)}
+  end
+
+  defp event_time(event), do: format_event_time(event[:timestamp])
+
+  # ── Payload extraction helpers ──
+
+  defp extract_method(event) do
+    payload = event[:payload]
+
+    cond do
+      is_map(payload) -> Map.get(payload, "method") || Map.get(payload, :method)
+      is_binary(event[:raw]) -> extract_method_from_raw(event[:raw])
+      true -> nil
+    end
+  end
+
+  defp extract_method_from_raw(raw) do
+    case Jason.decode(raw) do
+      {:ok, %{"method" => method}} -> method
+      _ -> nil
+    end
+  end
+
+  defp extract_delta_text(event) do
+    payload = event[:payload] || decode_raw(event[:raw])
+    params = map_get_any(payload, ["params", :params]) || %{}
+
+    map_get_any(params, ["delta", :delta]) ||
+      map_get_any(params, ["textDelta", :textDelta]) ||
+      map_get_any(params, ["summaryTextDelta", :summaryTextDelta]) ||
+      map_get_any(params, ["outputDelta", :outputDelta]) ||
+      ""
+  end
+
+  defp extract_item_type(event) do
+    payload = event[:payload] || decode_raw(event[:raw])
+    params = map_get_any(payload, ["params", :params]) || %{}
+    item = map_get_any(params, ["item", :item]) || map_get_any(params, ["msg", :msg]) || %{}
+    map_get_any(item, ["type", :type])
+  end
+
+  defp extract_item_status(event) do
+    payload = event[:payload] || decode_raw(event[:raw])
+    params = map_get_any(payload, ["params", :params]) || %{}
+    item = map_get_any(params, ["item", :item]) || %{}
+    map_get_any(item, ["status", :status])
+  end
+
+  defp extract_command_text(event) do
+    payload = event[:payload] || decode_raw(event[:raw])
+    params = map_get_any(payload, ["params", :params]) || %{}
+    map_get_any(params, ["command", :command])
+  end
+
+  defp extract_tool_name(event) do
+    payload = event[:payload] || decode_raw(event[:raw])
+    params = map_get_any(payload, ["params", :params]) || %{}
+    map_get_any(params, ["tool", :tool]) || map_get_any(params, ["name", :name])
+  end
+
+  defp describe_file_change(event) do
+    payload = event[:payload] || decode_raw(event[:raw])
+    params = map_get_any(payload, ["params", :params]) || %{}
+    count = map_get_any(params, ["fileChangeCount", :fileChangeCount]) || map_get_any(params, ["changeCount", :changeCount])
+    if is_integer(count), do: "#{count} file change(s)", else: "file change"
+  end
+
+  defp decode_raw(nil), do: %{}
+
+  defp decode_raw(raw) when is_binary(raw) do
+    case Jason.decode(raw) do
+      {:ok, m} -> m
+      _ -> %{}
+    end
+  end
+
+  defp decode_raw(m) when is_map(m), do: m
+
+  defp map_get_any(nil, _keys), do: nil
+  defp map_get_any(map, keys) when is_map(map), do: Enum.find_value(keys, fn k -> Map.get(map, k) end)
+  defp map_get_any(_map, _keys), do: nil
+
+  defp delta_type("item/agentMessage/delta"), do: :message
+  defp delta_type("item/reasoning/textDelta"), do: :reasoning
+  defp delta_type("item/reasoning/summaryTextDelta"), do: :reasoning
+  defp delta_type("item/reasoning/summaryPartAdded"), do: :reasoning
+  defp delta_type("item/commandExecution/outputDelta"), do: :command
+  defp delta_type("item/fileChange/outputDelta"), do: :file_change
+  defp delta_type("item/plan/delta"), do: :message
+  defp delta_type(_), do: :message
+
+  defp item_class(%{type: :message}), do: "chat-item chat-item-message"
+  defp item_class(%{type: :reasoning}), do: "chat-item chat-item-reasoning"
+  defp item_class(%{type: :command}), do: "chat-item chat-item-command"
+  defp item_class(%{type: :tool_call}), do: "chat-item chat-item-tool"
+  defp item_class(%{type: :file_change}), do: "chat-item chat-item-tool"
+  defp item_class(%{type: :system}), do: "chat-item chat-item-system"
+  defp item_class(%{type: :event}), do: "chat-item chat-item-event"
+  defp item_class(_), do: "chat-item"
 
   @event_badge_modifiers %{
     session_started: "chat-badge-info",
@@ -247,9 +466,7 @@ defmodule OdysseyElixirWeb.ChatLive do
     "#{mins}m #{secs}s"
   end
 
-  defp runtime_seconds(%DateTime{} = started_at, %DateTime{} = now) do
-    max(DateTime.diff(now, started_at, :second), 0)
-  end
+  defp runtime_seconds(%DateTime{} = started_at, %DateTime{} = now), do: max(DateTime.diff(now, started_at, :second), 0)
 
   defp runtime_seconds(started_at, %DateTime{} = now) when is_binary(started_at) do
     case DateTime.from_iso8601(started_at) do
@@ -260,25 +477,16 @@ defmodule OdysseyElixirWeb.ChatLive do
 
   defp runtime_seconds(_started_at, _now), do: 0
 
+  defp format_event_time(%DateTime{} = dt), do: dt |> DateTime.truncate(:second) |> Calendar.strftime("%H:%M:%S")
+  defp format_event_time(_), do: ""
+
   defp format_int(value) when is_integer(value) do
-    value
-    |> Integer.to_string()
-    |> String.reverse()
-    |> String.replace(~r/.{3}(?=.)/, "\\0,")
-    |> String.reverse()
+    value |> Integer.to_string() |> String.reverse() |> String.replace(~r/.{3}(?=.)/, "\\0,") |> String.reverse()
   end
 
   defp format_int(_value), do: "n/a"
 
-  defp orchestrator do
-    Endpoint.config(:orchestrator) || OdysseyElixir.Orchestrator
-  end
-
-  defp snapshot_timeout_ms do
-    Endpoint.config(:snapshot_timeout_ms) || 15_000
-  end
-
-  defp schedule_runtime_tick do
-    Process.send_after(self(), :runtime_tick, @runtime_tick_ms)
-  end
+  defp orchestrator, do: Endpoint.config(:orchestrator) || OdysseyElixir.Orchestrator
+  defp snapshot_timeout_ms, do: Endpoint.config(:snapshot_timeout_ms) || 15_000
+  defp schedule_runtime_tick, do: Process.send_after(self(), :runtime_tick, @runtime_tick_ms)
 end
