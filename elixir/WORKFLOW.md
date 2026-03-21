@@ -261,6 +261,7 @@ Use this only when completion is blocked by missing required tools or missing au
 
 ## Completion bar before Human Review
 
+- Branch is rebased on latest `origin/main` with no merge conflicts; all checks pass after the rebase. If conflicts exist, resolve them, commit, push, and rerun checks before proceeding.
 - Step 1/2 checklist is fully complete and accurately reflected in the single workpad comment.
 - Acceptance criteria and required ticket-provided validation items are complete.
 - Validation/tests are green for the latest commit.
