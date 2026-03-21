@@ -38,6 +38,7 @@ defmodule OdysseyElixir.MixProject do
           OdysseyElixirWeb.Router,
           OdysseyElixirWeb.Router.Helpers,
           OdysseyElixir.EventStore,
+          OdysseyElixir.Notifier,
           OdysseyElixirWeb.ChatLive
         ]
       ],
