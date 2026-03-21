@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, EventStore, StatusDashboard, Tracker, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -158,6 +158,7 @@ defmodule SymphonyElixir.Orchestrator do
 
         Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
 
+        EventStore.clear(issue_id)
         notify_dashboard()
         {:noreply, state}
     end
@@ -190,6 +191,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       running_entry ->
         {updated_running_entry, token_delta} = integrate_codex_update(running_entry, update)
+        EventStore.push(issue_id, update)
 
         state =
           state
@@ -432,6 +434,8 @@ defmodule SymphonyElixir.Orchestrator do
         if is_reference(ref) do
           Process.demonitor(ref, [:flush])
         end
+
+        EventStore.clear(issue_id)
 
         %{
           state
