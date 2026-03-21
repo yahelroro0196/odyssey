@@ -37,6 +37,17 @@ defmodule OdysseyElixirWeb.ObservabilityApiController do
     end
   end
 
+  @spec cancel(Conn.t(), map()) :: Conn.t()
+  def cancel(conn, %{"issue_identifier" => issue_identifier}) do
+    case OdysseyElixir.Orchestrator.cancel_issue(orchestrator(), issue_identifier) do
+      :ok ->
+        json(conn, %{status: "cancelled", issue_identifier: issue_identifier})
+
+      {:error, :not_found} ->
+        error_response(conn, 404, "issue_not_found", "Issue not found or not running")
+    end
+  end
+
   @spec method_not_allowed(Conn.t(), map()) :: Conn.t()
   def method_not_allowed(conn, _params) do
     error_response(conn, 405, "method_not_allowed", "Method not allowed")

@@ -468,6 +468,29 @@ pre,
   }
 }
 
+.cancel-button {
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.cancel-button:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.pr-link {
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 /* ── Chat View ── */
 
 .chat-shell {

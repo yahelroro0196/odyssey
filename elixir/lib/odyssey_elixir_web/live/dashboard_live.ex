@@ -148,19 +148,23 @@ defmodule OdysseyElixirWeb.DashboardLive do
                 <colgroup>
                   <col style="width: 12rem;" />
                   <col style="width: 8rem;" />
+                  <col style="width: 5rem;" />
                   <col style="width: 7.5rem;" />
                   <col style="width: 8.5rem;" />
                   <col />
                   <col style="width: 10rem;" />
+                  <col style="width: 5rem;" />
                 </colgroup>
                 <thead>
                   <tr>
                     <th>Issue</th>
                     <th>State</th>
+                    <th>PR</th>
                     <th>Session</th>
                     <th>Runtime / turns</th>
                     <th>Codex update</th>
                     <th>Tokens</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -175,6 +179,13 @@ defmodule OdysseyElixirWeb.DashboardLive do
                       <span class={state_badge_class(entry.state)}>
                         <%= entry.state %>
                       </span>
+                    </td>
+                    <td>
+                      <%= if entry.pr_url do %>
+                        <a class="pr-link" href={entry.pr_url} target="_blank">PR</a>
+                      <% else %>
+                        <span class="muted">&mdash;</span>
+                      <% end %>
                     </td>
                     <td>
                       <div class="session-stack">
@@ -213,6 +224,15 @@ defmodule OdysseyElixirWeb.DashboardLive do
                         <span>Total: <%= format_int(entry.tokens.total_tokens) %></span>
                         <span class="muted">In <%= format_int(entry.tokens.input_tokens) %> / Out <%= format_int(entry.tokens.output_tokens) %></span>
                       </div>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        class="cancel-button"
+                        onclick={"fetch('/api/v1/#{entry.issue_identifier}/cancel', {method:'POST',headers:{'content-type':'application/json'}}).then(()=>location.reload())"}
+                      >
+                        Cancel
+                      </button>
                     </td>
                   </tr>
                 </tbody>
