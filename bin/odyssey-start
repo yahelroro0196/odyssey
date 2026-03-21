@@ -58,6 +58,9 @@ echo "  Dashboard: http://localhost:${PORT}"
 echo "  Workflow:  ${WORKFLOW}"
 echo "  Reload:    $(dirname "$0")/odyssey-reload"
 
+# Resolve to absolute path before changing directory
+WORKFLOW="$(cd "$REPO_ROOT" && realpath "$WORKFLOW")"
+
 MIX_CMD="mix odyssey.run ${WORKFLOW} --port ${PORT}"
 
 cd "$ODYSSEY_ELIXIR"
