@@ -704,8 +704,10 @@ defmodule OdysseyElixir.Orchestrator do
   end
 
   defp spawn_issue_on_worker_host(%State{} = state, issue, attempt, recipient, worker_host) do
+    role = Config.agent_role_for_state(issue.state)
+
     case Task.Supervisor.start_child(OdysseyElixir.TaskSupervisor, fn ->
-           AgentRunner.run(issue, recipient, attempt: attempt, worker_host: worker_host)
+           AgentRunner.run(issue, recipient, attempt: attempt, worker_host: worker_host, role: role)
          end) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
@@ -721,6 +723,7 @@ defmodule OdysseyElixir.Orchestrator do
             worker_host: worker_host,
             workspace_path: nil,
             session_id: nil,
+            role: role,
             pr_url: nil,
             last_codex_message: nil,
             last_codex_timestamp: nil,
@@ -1208,7 +1211,9 @@ defmodule OdysseyElixir.Orchestrator do
   end
 
   defp maybe_enforce_token_budget(state, issue_id, running_entry) do
-    case Config.settings!().codex.max_tokens_per_agent do
+    role = Map.get(running_entry, :role, :coder)
+
+    case Config.agent_codex_config(role).max_tokens_per_agent do
       nil ->
         state
 
