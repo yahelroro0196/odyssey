@@ -14,9 +14,11 @@ defmodule SymphonyElixirWeb.DashboardLive do
       socket
       |> assign(:payload, load_payload())
       |> assign(:now, DateTime.utc_now())
+      |> assign(:config_reload, load_config_reload_status())
 
     if connected?(socket) do
       :ok = ObservabilityPubSub.subscribe()
+      :ok = SymphonyElixir.WorkflowStore.subscribe_config()
       schedule_runtime_tick()
     end
 
@@ -35,6 +37,11 @@ defmodule SymphonyElixirWeb.DashboardLive do
      socket
      |> assign(:payload, load_payload())
      |> assign(:now, DateTime.utc_now())}
+  end
+
+  @impl true
+  def handle_info({:config_reloaded, _metadata}, socket) do
+    {:noreply, assign(socket, :config_reload, load_config_reload_status())}
   end
 
   @impl true
@@ -64,6 +71,14 @@ defmodule SymphonyElixirWeb.DashboardLive do
               <span class="status-badge-dot"></span>
               Offline
             </span>
+            <%= if @config_reload.last_reloaded_at do %>
+              <span
+                class="status-badge status-badge-config"
+                title={"Config reloaded at #{format_reload_time(@config_reload.last_reloaded_at)}\nChanged: #{Enum.join(@config_reload.last_changed_sections, ", ")}"}
+              >
+                Config reloaded (<%= @config_reload.reload_count %>)
+              </span>
+            <% end %>
           </div>
         </div>
       </header>
@@ -327,4 +342,17 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp pretty_value(nil), do: "n/a"
   defp pretty_value(value), do: inspect(value, pretty: true, limit: :infinity)
+
+  defp load_config_reload_status do
+    case Process.whereis(SymphonyElixir.WorkflowStore) do
+      pid when is_pid(pid) -> SymphonyElixir.WorkflowStore.reload_status()
+      _ -> %{last_reloaded_at: nil, last_changed_sections: [], reload_count: 0}
+    end
+  end
+
+  defp format_reload_time(%DateTime{} = dt) do
+    dt |> DateTime.truncate(:second) |> Calendar.strftime("%H:%M:%S")
+  end
+
+  defp format_reload_time(_), do: ""
 end

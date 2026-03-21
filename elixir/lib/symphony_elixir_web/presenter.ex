@@ -20,7 +20,8 @@ defmodule SymphonyElixirWeb.Presenter do
           running: Enum.map(snapshot.running, &running_entry_payload/1),
           retrying: Enum.map(snapshot.retrying, &retry_entry_payload/1),
           codex_totals: snapshot.codex_totals,
-          rate_limits: snapshot.rate_limits
+          rate_limits: snapshot.rate_limits,
+          config: config_reload_payload()
         }
 
       :timeout ->
@@ -213,4 +214,15 @@ defmodule SymphonyElixirWeb.Presenter do
   end
 
   defp iso8601(_datetime), do: nil
+
+  defp config_reload_payload do
+    case Process.whereis(SymphonyElixir.WorkflowStore) do
+      pid when is_pid(pid) ->
+        status = SymphonyElixir.WorkflowStore.reload_status()
+        %{status | last_reloaded_at: iso8601(status.last_reloaded_at)}
+
+      _ ->
+        %{last_reloaded_at: nil, last_changed_sections: [], reload_count: 0}
+    end
+  end
 end

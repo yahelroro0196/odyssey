@@ -235,6 +235,12 @@ pre,
   display: none;
 }
 
+.status-badge-config {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
 .metric-grid {
   display: grid;
   gap: 0.85rem;
