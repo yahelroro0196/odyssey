@@ -95,6 +95,22 @@ defmodule SymphonyElixirWeb.Presenter do
   defp issue_status(nil, _retry), do: "retrying"
   defp issue_status(_running, _retry), do: "running"
 
+  @spec find_running_by_identifier(String.t(), GenServer.name(), timeout()) ::
+          {:ok, map()} | {:error, :not_found}
+  def find_running_by_identifier(issue_identifier, orchestrator, snapshot_timeout_ms)
+      when is_binary(issue_identifier) do
+    case Orchestrator.snapshot(orchestrator, snapshot_timeout_ms) do
+      %{} = snapshot ->
+        case Enum.find(snapshot.running, &(&1.identifier == issue_identifier)) do
+          nil -> {:error, :not_found}
+          entry -> {:ok, running_entry_payload(entry)}
+        end
+
+      _ ->
+        {:error, :not_found}
+    end
+  end
+
   defp running_entry_payload(entry) do
     %{
       issue_id: entry.issue_id,
