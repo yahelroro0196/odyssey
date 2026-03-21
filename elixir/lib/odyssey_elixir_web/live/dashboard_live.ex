@@ -64,6 +64,7 @@ defmodule OdysseyElixirWeb.DashboardLive do
 
           <div class="status-stack">
             <a href="/tmux" class="tmux-button">Split View</a>
+            <button type="button" class="reload-button" onclick="fetch('/api/v1/reload',{method:'POST'}).then(r=>r.json()).then(d=>{this.textContent=d.status==='reloaded'?'Reloaded!':'No changes';setTimeout(()=>{this.textContent='Reload Code'},1500)})">Reload Code</button>
             <span class="status-badge status-badge-live">
               <span class="status-badge-dot"></span>
               Live

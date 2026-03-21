@@ -24,6 +24,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --port <N>          Dashboard port (default: 4000)"
       echo "  --background, -d    Run as background daemon"
       echo "  --logs-root <path>  Log directory (default: REPO_ROOT/log)"
+      echo ""
+      echo "Hot reload: $(dirname "$0")/odyssey-reload"
       exit 0 ;;
     *) echo "Unknown option: $1 (try --help)"; exit 1 ;;
   esac
@@ -35,18 +37,12 @@ if [ ! -f "$WORKFLOW" ]; then
   exit 1
 fi
 
-# Build if needed
-if [ ! -f "${ODYSSEY_ELIXIR}/bin/odyssey" ]; then
-  echo "Building Odyssey..."
+# Ensure deps
+if [ ! -d "${ODYSSEY_ELIXIR}/deps" ]; then
+  echo "Fetching dependencies..."
   cd "$ODYSSEY_ELIXIR"
-  if command -v mise &>/dev/null; then
-    mise trust 2>/dev/null || true
-    mise exec -- mix deps.get --quiet
-    mise exec -- mix build
-  else
-    mix deps.get --quiet
-    mix build
-  fi
+  if command -v mise &>/dev/null; then mise trust 2>/dev/null; mise exec -- mix deps.get --quiet
+  else mix deps.get --quiet; fi
   cd "$REPO_ROOT"
 fi
 
@@ -57,20 +53,30 @@ if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   exit 1
 fi
 
-echo "Starting Odyssey..."
+echo "Starting Odyssey (hot-reloadable)..."
 echo "  Dashboard: http://localhost:${PORT}"
 echo "  Workflow:  ${WORKFLOW}"
+echo "  Reload:    $(dirname "$0")/odyssey-reload"
 
-ODYSSEY_BIN="${ODYSSEY_ELIXIR}/bin/odyssey"
-ODYSSEY_ARGS="${WORKFLOW} --port ${PORT} --i-understand-that-this-will-be-running-without-the-usual-guardrails"
+MIX_CMD="mix odyssey.run ${WORKFLOW} --port ${PORT}"
+
+cd "$ODYSSEY_ELIXIR"
 
 if [ "$BACKGROUND" = true ]; then
   mkdir -p "$LOG_DIR"
   LOG_FILE="${LOG_DIR}/odyssey.log"
-  nohup "$ODYSSEY_BIN" $ODYSSEY_ARGS > "$LOG_FILE" 2>&1 &
+  if command -v mise &>/dev/null; then
+    nohup mise exec -- $MIX_CMD > "$LOG_FILE" 2>&1 &
+  else
+    nohup $MIX_CMD > "$LOG_FILE" 2>&1 &
+  fi
   echo $! > "$PID_FILE"
   echo "  PID:       $! (background)"
   echo "  Log:       ${LOG_FILE}"
 else
-  exec "$ODYSSEY_BIN" $ODYSSEY_ARGS
+  if command -v mise &>/dev/null; then
+    exec mise exec -- $MIX_CMD
+  else
+    exec $MIX_CMD
+  fi
 fi

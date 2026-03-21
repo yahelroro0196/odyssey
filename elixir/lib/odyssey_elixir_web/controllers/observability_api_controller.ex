@@ -48,6 +48,24 @@ defmodule OdysseyElixirWeb.ObservabilityApiController do
     end
   end
 
+  @spec reload(Conn.t(), map()) :: Conn.t()
+  def reload(conn, _params) do
+    {result, modules} = do_reload()
+    json(conn, %{status: result, modules_reloaded: length(modules)})
+  end
+
+  defp do_reload do
+    case IEx.Helpers.recompile() do
+      {:recompiled, modules} -> {"reloaded", modules}
+      _ -> {"no_changes", []}
+    end
+  rescue
+    _ ->
+      case Code.compile_file("mix.exs") do
+        _ -> {"reloaded", []}
+      end
+  end
+
   @spec method_not_allowed(Conn.t(), map()) :: Conn.t()
   def method_not_allowed(conn, _params) do
     error_response(conn, 405, "method_not_allowed", "Method not allowed")

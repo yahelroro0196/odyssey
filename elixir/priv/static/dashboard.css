@@ -486,6 +486,23 @@ pre,
   color: #6d28d9;
 }
 
+.reload-button {
+  display: inline-block;
+  padding: 0.3rem 0.8rem;
+  border-radius: 8px;
+  background: var(--card-muted);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.82rem;
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.reload-button:hover {
+  background: var(--line);
+}
+
 .cancel-button {
   padding: 0.2rem 0.6rem;
   border-radius: 6px;
