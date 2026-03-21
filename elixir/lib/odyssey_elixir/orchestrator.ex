@@ -7,7 +7,7 @@ defmodule OdysseyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias OdysseyElixir.{AgentRunner, Config, EventStore, StatusDashboard, Tracker, Workspace}
+  alias OdysseyElixir.{AgentRunner, Config, EventStore, Notifier, StatusDashboard, Tracker, Workspace}
   alias OdysseyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -109,6 +109,7 @@ defmodule OdysseyElixir.Orchestrator do
   def handle_info(:run_poll_cycle, state) do
     state = refresh_runtime_config(state)
     state = maybe_dispatch(state)
+    state = maybe_run_worktree_gc(state)
     state = schedule_tick(state, state.poll_interval_ms)
     state = %{state | poll_check_in_progress: false}
 
@@ -158,6 +159,11 @@ defmodule OdysseyElixir.Orchestrator do
 
         Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
 
+        case reason do
+          :normal -> Notifier.notify(running_entry.identifier, :completed, %{session_id: session_id})
+          _ -> Notifier.notify(running_entry.identifier, :failed, %{session_id: session_id, reason: inspect(reason)})
+        end
+
         EventStore.clear(issue_id)
         notify_dashboard()
         {:noreply, state}
@@ -198,8 +204,11 @@ defmodule OdysseyElixir.Orchestrator do
           |> apply_codex_token_delta(token_delta)
           |> apply_codex_rate_limits(update)
 
+        state = %{state | running: Map.put(running, issue_id, updated_running_entry)}
+        state = maybe_enforce_token_budget(state, issue_id, updated_running_entry)
+
         notify_dashboard()
-        {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
+        {:noreply, state}
     end
   end
 
@@ -712,6 +721,7 @@ defmodule OdysseyElixir.Orchestrator do
             worker_host: worker_host,
             workspace_path: nil,
             session_id: nil,
+            pr_url: nil,
             last_codex_message: nil,
             last_codex_timestamp: nil,
             last_codex_event: nil,
@@ -1076,6 +1086,15 @@ defmodule OdysseyElixir.Orchestrator do
   end
 
   @spec request_refresh(GenServer.server()) :: map() | :unavailable
+  @spec cancel_issue(GenServer.name(), String.t()) :: :ok | {:error, :not_found}
+  def cancel_issue(server \\ __MODULE__, issue_identifier) when is_binary(issue_identifier) do
+    if Process.whereis(server) do
+      GenServer.call(server, {:cancel_issue, issue_identifier})
+    else
+      {:error, :not_found}
+    end
+  end
+
   def request_refresh(server) do
     if Process.whereis(server) do
       GenServer.call(server, :request_refresh)
@@ -1126,6 +1145,7 @@ defmodule OdysseyElixir.Orchestrator do
           last_codex_timestamp: metadata.last_codex_timestamp,
           last_codex_message: metadata.last_codex_message,
           last_codex_event: metadata.last_codex_event,
+          pr_url: Map.get(metadata, :pr_url),
           runtime_seconds: running_seconds(metadata.started_at, now)
         }
       end)
@@ -1158,6 +1178,20 @@ defmodule OdysseyElixir.Orchestrator do
      }, state}
   end
 
+  def handle_call({:cancel_issue, issue_identifier}, _from, %{running: running} = state) do
+    case Enum.find(running, fn {_id, entry} -> entry.identifier == issue_identifier end) do
+      {issue_id, _entry} ->
+        Logger.info("Cancelling agent for identifier=#{issue_identifier} issue_id=#{issue_id}")
+        Notifier.notify(issue_identifier, :cancelled, %{})
+        state = terminate_running_issue(state, issue_id, false)
+        notify_dashboard()
+        {:reply, :ok, state}
+
+      nil ->
+        {:reply, {:error, :not_found}, state}
+    end
+  end
+
   def handle_call(:request_refresh, _from, state) do
     now_ms = System.monotonic_time(:millisecond)
     already_due? = is_integer(state.next_poll_due_at_ms) and state.next_poll_due_at_ms <= now_ms
@@ -1171,6 +1205,34 @@ defmodule OdysseyElixir.Orchestrator do
        requested_at: DateTime.utc_now(),
        operations: ["poll", "reconcile"]
      }, state}
+  end
+
+  defp maybe_enforce_token_budget(state, issue_id, running_entry) do
+    case Config.settings!().codex.max_tokens_per_agent do
+      nil ->
+        state
+
+      max when is_integer(max) and max > 0 ->
+        if running_entry.codex_total_tokens > max do
+          Logger.warning("Token budget exceeded for issue_id=#{issue_id} identifier=#{running_entry.identifier} tokens=#{running_entry.codex_total_tokens} budget=#{max}; terminating agent")
+
+          Notifier.notify(running_entry.identifier, :budget_exceeded, %{tokens: running_entry.codex_total_tokens, budget: max})
+
+          state
+          |> terminate_running_issue(issue_id, false)
+          |> schedule_issue_retry(issue_id, nil, %{
+            identifier: running_entry.identifier,
+            error: "token budget exceeded (#{running_entry.codex_total_tokens}/#{max})",
+            worker_host: Map.get(running_entry, :worker_host),
+            workspace_path: Map.get(running_entry, :workspace_path)
+          })
+        else
+          state
+        end
+
+      _ ->
+        state
+    end
   end
 
   defp integrate_codex_update(running_entry, %{event: event, timestamp: timestamp} = update) do
@@ -1197,7 +1259,8 @@ defmodule OdysseyElixir.Orchestrator do
         codex_last_reported_input_tokens: max(last_reported_input, token_delta.input_reported),
         codex_last_reported_output_tokens: max(last_reported_output, token_delta.output_reported),
         codex_last_reported_total_tokens: max(last_reported_total, token_delta.total_reported),
-        turn_count: turn_count_for_update(turn_count, running_entry.session_id, update)
+        turn_count: turn_count_for_update(turn_count, running_entry.session_id, update),
+        pr_url: pr_url_for_update(Map.get(running_entry, :pr_url), update)
       }),
       token_delta
     }
@@ -1245,6 +1308,19 @@ defmodule OdysseyElixir.Orchestrator do
       message: update[:payload] || update[:raw],
       timestamp: update[:timestamp]
     }
+  end
+
+  @pr_url_pattern ~r{https://github\.com/[^\s"'<>]+/pull/\d+}
+
+  defp pr_url_for_update(existing, _update) when is_binary(existing), do: existing
+
+  defp pr_url_for_update(nil, update) do
+    raw = to_string(update[:raw] || "")
+
+    case Regex.run(@pr_url_pattern, raw) do
+      [url | _] -> url
+      _ -> nil
+    end
   end
 
   defp schedule_tick(%State{} = state, delay_ms) when is_integer(delay_ms) and delay_ms >= 0 do
@@ -1305,6 +1381,38 @@ defmodule OdysseyElixir.Orchestrator do
       | poll_interval_ms: config.polling.interval_ms,
         max_concurrent_agents: config.agent.max_concurrent_agents
     }
+  end
+
+  @gc_interval_ms 5 * 60 * 1_000
+
+  defp maybe_run_worktree_gc(%State{} = state) do
+    now_ms = System.monotonic_time(:millisecond)
+    last_gc = Map.get(state, :last_gc_at_ms, 0)
+
+    if now_ms - last_gc >= @gc_interval_ms do
+      Workspace.cleanup_orphan_worktrees(active_identifiers_set(state))
+      Map.put(state, :last_gc_at_ms, now_ms)
+    else
+      state
+    end
+  end
+
+  defp active_identifiers_set(%State{} = state) do
+    running_ids =
+      Enum.reduce(state.running, MapSet.new(), fn {_id, entry}, acc ->
+        MapSet.put(acc, safe_identifier(entry.identifier))
+      end)
+
+    Enum.reduce(state.retry_attempts, running_ids, fn {_id, retry}, acc ->
+      case Map.get(retry, :identifier) do
+        id when is_binary(id) -> MapSet.put(acc, safe_identifier(id))
+        _ -> acc
+      end
+    end)
+  end
+
+  defp safe_identifier(identifier) do
+    String.replace(identifier || "issue", ~r/[^a-zA-Z0-9._-]/, "_")
   end
 
   defp retry_candidate_issue?(%Issue{} = issue, terminal_states) do
