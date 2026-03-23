@@ -5,10 +5,24 @@ work instead of supervising coding agents.
 
 [![Odyssey demo video preview](.github/media/odyssey-demo-poster.jpg)](.github/media/odyssey-demo.mp4)
 
-_In this [demo video](.github/media/odyssey-demo.mp4), Odyssey monitors a Linear board for work and spawns agents to handle the tasks. The agents complete the tasks and provide proof of work: CI status, PR review feedback, complexity analysis, and walkthrough videos. When accepted, the agents land the PR safely. Engineers do not need to supervise Codex; they can manage the work at a higher level._
+_In this [demo video](.github/media/odyssey-demo.mp4), Odyssey monitors a Linear board for work and spawns agents to handle the tasks. The agents complete the tasks and provide proof of work: CI status, PR review feedback, complexity analysis, and walkthrough videos. When accepted, the agents land the PR safely. Engineers manage work at a higher level instead of supervising individual agent turns._
 
 > [!WARNING]
 > Odyssey is a low-key engineering preview for testing in trusted environments.
+
+## Supported Agent Runtimes
+
+Odyssey supports multiple coding agent backends, configurable per role (coder / reviewer) in
+`WORKFLOW.md`:
+
+| Provider | Mode | Configuration |
+|----------|------|---------------|
+| **Codex** (default) | JSON-RPC 2.0 app-server over stdio | `provider: codex` |
+| **Claude Code** | CLI with `--output-format stream-json` | `provider: claude_code` |
+
+Set the `provider` field under `codex:` or `review_agent:` in your `WORKFLOW.md` to choose the
+backend. Both providers support multi-turn sessions, auto-approval for unattended operation, and
+streaming event observability through the dashboard.
 
 ## Running Odyssey
 
