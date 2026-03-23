@@ -109,6 +109,14 @@ defmodule OdysseyElixir.Config do
   def agent_codex_config(:review), do: settings!().review_agent
   def agent_codex_config(_role), do: settings!().codex
 
+  @spec agent_backend(:coder | :review) :: module()
+  def agent_backend(role) do
+    case agent_codex_config(role).provider do
+      "claude_code" -> OdysseyElixir.ClaudeCode.CliClient
+      _ -> OdysseyElixir.Codex.AppServer
+    end
+  end
+
   @default_review_prompt """
   You are a code review agent for Linear ticket `{{ issue.identifier }}`.
 

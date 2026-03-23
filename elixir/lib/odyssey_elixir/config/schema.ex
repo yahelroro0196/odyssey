@@ -158,6 +158,7 @@ defmodule OdysseyElixir.Config.Schema do
 
     @primary_key false
     embedded_schema do
+      field(:provider, :string, default: "codex")
       field(:command, :string, default: "codex app-server")
 
       field(:approval_policy, StringOrMap,
@@ -176,6 +177,7 @@ defmodule OdysseyElixir.Config.Schema do
       field(:read_timeout_ms, :integer, default: 5_000)
       field(:stall_timeout_ms, :integer, default: 300_000)
       field(:max_tokens_per_agent, :integer)
+      field(:claude_code_options, :map)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -184,6 +186,7 @@ defmodule OdysseyElixir.Config.Schema do
       |> cast(
         attrs,
         [
+          :provider,
           :command,
           :approval_policy,
           :thread_sandbox,
@@ -191,11 +194,13 @@ defmodule OdysseyElixir.Config.Schema do
           :turn_timeout_ms,
           :read_timeout_ms,
           :stall_timeout_ms,
-          :max_tokens_per_agent
+          :max_tokens_per_agent,
+          :claude_code_options
         ],
         empty_values: []
       )
       |> validate_required([:command])
+      |> validate_inclusion(:provider, ["codex", "claude_code"])
       |> validate_number(:turn_timeout_ms, greater_than: 0)
       |> validate_number(:read_timeout_ms, greater_than: 0)
       |> validate_number(:stall_timeout_ms, greater_than_or_equal_to: 0)
@@ -253,6 +258,7 @@ defmodule OdysseyElixir.Config.Schema do
     @primary_key false
     embedded_schema do
       field(:enabled, :boolean, default: false)
+      field(:provider, :string, default: "codex")
       field(:command, :string, default: "codex app-server")
       field(:prompt, :string)
       field(:state_name, :string, default: "AI Review")
@@ -273,6 +279,7 @@ defmodule OdysseyElixir.Config.Schema do
       field(:read_timeout_ms, :integer, default: 5_000)
       field(:stall_timeout_ms, :integer, default: 300_000)
       field(:max_tokens_per_agent, :integer)
+      field(:claude_code_options, :map)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -282,6 +289,7 @@ defmodule OdysseyElixir.Config.Schema do
         attrs,
         [
           :enabled,
+          :provider,
           :command,
           :prompt,
           :state_name,
@@ -291,7 +299,8 @@ defmodule OdysseyElixir.Config.Schema do
           :turn_timeout_ms,
           :read_timeout_ms,
           :stall_timeout_ms,
-          :max_tokens_per_agent
+          :max_tokens_per_agent,
+          :claude_code_options
         ],
         empty_values: []
       )

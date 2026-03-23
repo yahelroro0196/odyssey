@@ -3,6 +3,8 @@ defmodule OdysseyElixir.Codex.AppServer do
   Minimal client for the Codex app-server JSON-RPC 2.0 stream over stdio.
   """
 
+  @behaviour OdysseyElixir.AgentBackend
+
   require Logger
   alias OdysseyElixir.{Codex.DynamicTool, Config, PathSafety, SSH}
 
@@ -146,7 +148,8 @@ defmodule OdysseyElixir.Codex.AppServer do
     stop_port(port)
   end
 
-  defp validate_workspace_cwd(workspace, nil) when is_binary(workspace) do
+  @spec validate_workspace_cwd(Path.t(), String.t() | nil) :: {:ok, Path.t()} | {:error, term()}
+  def validate_workspace_cwd(workspace, nil) when is_binary(workspace) do
     expanded_workspace = Path.expand(workspace)
     expanded_root = Path.expand(Config.settings!().workspace.root)
     expanded_root_prefix = expanded_root <> "/"
@@ -174,8 +177,8 @@ defmodule OdysseyElixir.Codex.AppServer do
     end
   end
 
-  defp validate_workspace_cwd(workspace, worker_host)
-       when is_binary(workspace) and is_binary(worker_host) do
+  def validate_workspace_cwd(workspace, worker_host)
+      when is_binary(workspace) and is_binary(worker_host) do
     cond do
       String.trim(workspace) == "" ->
         {:error, {:invalid_workspace_cwd, :empty_remote_workspace, worker_host}}
@@ -228,7 +231,7 @@ defmodule OdysseyElixir.Codex.AppServer do
     base_metadata =
       case :erlang.port_info(port, :os_pid) do
         {:os_pid, os_pid} ->
-          %{codex_app_server_pid: to_string(os_pid)}
+          %{agent_pid: to_string(os_pid)}
 
         _ ->
           %{}
