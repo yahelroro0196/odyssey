@@ -1,7 +1,8 @@
 # Odyssey
 
-Odyssey turns project work into isolated, autonomous implementation runs, allowing teams to manage
-work instead of supervising coding agents.
+Odyssey orchestrates coding agents to autonomously execute project work — polling issue trackers,
+spinning up isolated workspaces, and running agent sessions end-to-end so teams manage work, not
+agents.
 
 [![Odyssey demo video preview](.github/media/odyssey-demo-poster.jpg)](.github/media/odyssey-demo.mp4)
 
