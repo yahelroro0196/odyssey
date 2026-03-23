@@ -310,7 +310,7 @@ defmodule OdysseyElixirWeb.ChatLive do
   defp classify_event(event, "turn/diff/updated"), do: %{type: :system, text: "Diff updated", time: event_time(event)}
 
   defp classify_event(event, _method) do
-    text = OdysseyElixir.StatusDashboard.humanize_codex_message(event)
+    text = OdysseyElixir.StatusDashboard.humanize_agent_message(event)
     %{type: :event, text: text, time: event_time(event), event_type: event[:event]}
   end
 

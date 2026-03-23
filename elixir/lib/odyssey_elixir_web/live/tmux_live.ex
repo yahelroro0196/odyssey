@@ -292,7 +292,7 @@ defmodule OdysseyElixirWeb.TmuxLive do
   defp classify_event(event, "turn/started"), do: %{type: :system, text: "Turn started", time: event_time(event)}
 
   defp classify_event(event, _method) do
-    text = StatusDashboard.humanize_codex_message(event)
+    text = StatusDashboard.humanize_agent_message(event)
     %{type: :event, text: text, time: event_time(event)}
   end
 

@@ -261,7 +261,7 @@ defmodule OdysseyElixir.CoreTest do
           }
         },
         claimed: MapSet.new([issue_id]),
-        codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
         retry_attempts: %{}
       }
 
@@ -324,7 +324,7 @@ defmodule OdysseyElixir.CoreTest do
           }
         },
         claimed: MapSet.new([issue_id]),
-        codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
         retry_attempts: %{}
       }
 
@@ -444,7 +444,7 @@ defmodule OdysseyElixir.CoreTest do
         }
       },
       claimed: MapSet.new([issue_id]),
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
       retry_attempts: %{}
     }
 
@@ -491,7 +491,7 @@ defmodule OdysseyElixir.CoreTest do
         }
       },
       claimed: MapSet.new([issue_id]),
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
       retry_attempts: %{}
     }
 
@@ -682,8 +682,8 @@ defmodule OdysseyElixir.CoreTest do
       poll_check_in_progress: false,
       tick_timer_ref: nil,
       tick_token: stale_tick_token,
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      codex_rate_limits: nil
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      agent_rate_limits: nil
     }
 
     assert {:reply, %{queued: true, coalesced: false}, refreshed_state} =
@@ -1148,7 +1148,7 @@ defmodule OdysseyElixir.CoreTest do
                  issue_state_fetcher: fn [_issue_id] -> {:ok, [%{issue | state: "Done"}]} end
                )
 
-      assert_receive {:codex_worker_update, "issue-live-updates",
+      assert_receive {:agent_worker_update, "issue-live-updates",
                       %{
                         event: :session_started,
                         timestamp: %DateTime{},
