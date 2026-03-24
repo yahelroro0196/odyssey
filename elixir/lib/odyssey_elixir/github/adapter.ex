@@ -7,20 +7,22 @@ defmodule OdysseyElixir.GitHub.Adapter do
 
   alias OdysseyElixir.{Config, GitHub.Client}
 
+  defp client_module, do: Application.get_env(:odyssey_elixir, :github_client_module, Client)
+
   @spec fetch_candidate_issues() :: {:ok, [term()]} | {:error, term()}
-  def fetch_candidate_issues, do: Client.fetch_candidate_issues()
+  def fetch_candidate_issues, do: client_module().fetch_candidate_issues()
 
   @spec fetch_issues_by_states([String.t()]) :: {:ok, [term()]} | {:error, term()}
-  def fetch_issues_by_states(states), do: Client.fetch_issues_by_states(states)
+  def fetch_issues_by_states(states), do: client_module().fetch_issues_by_states(states)
 
   @spec fetch_issue_states_by_ids([String.t()]) :: {:ok, [term()]} | {:error, term()}
-  def fetch_issue_states_by_ids(issue_ids), do: Client.fetch_issue_states_by_ids(issue_ids)
+  def fetch_issue_states_by_ids(issue_ids), do: client_module().fetch_issue_states_by_ids(issue_ids)
 
   @spec create_comment(String.t(), String.t()) :: :ok | {:error, term()}
   def create_comment(issue_id, body) when is_binary(issue_id) and is_binary(body) do
     tracker = Config.settings!().tracker
 
-    case Client.rest_api("POST", "/repos/#{tracker.repo}/issues/#{issue_id}/comments", %{
+    case client_module().rest_api("POST", "/repos/#{tracker.repo}/issues/#{issue_id}/comments", %{
            "body" => body
          }) do
       {:ok, _} -> :ok
@@ -39,7 +41,7 @@ defmodule OdysseyElixir.GitHub.Adapter do
     with :ok <- remove_state_labels(tracker, issue_id, known_states),
          :ok <- add_state_label(tracker, issue_id, state_name) do
       if MapSet.member?(terminal_set, String.downcase(state_name)) do
-        case Client.rest_api("PATCH", "/repos/#{tracker.repo}/issues/#{issue_id}", %{
+        case client_module().rest_api("PATCH", "/repos/#{tracker.repo}/issues/#{issue_id}", %{
                "state" => "closed"
              }) do
           {:ok, _} -> :ok
@@ -52,7 +54,7 @@ defmodule OdysseyElixir.GitHub.Adapter do
   end
 
   defp remove_state_labels(tracker, issue_id, known_states) do
-    case Client.rest_api("GET", "/repos/#{tracker.repo}/issues/#{issue_id}/labels") do
+    case client_module().rest_api("GET", "/repos/#{tracker.repo}/issues/#{issue_id}/labels") do
       {:ok, labels} when is_list(labels) ->
         labels
         |> Enum.filter(fn
@@ -60,7 +62,7 @@ defmodule OdysseyElixir.GitHub.Adapter do
           _ -> false
         end)
         |> Enum.reduce_while(:ok, fn %{"name" => name}, :ok ->
-          case Client.rest_api(
+          case client_module().rest_api(
                  "DELETE",
                  "/repos/#{tracker.repo}/issues/#{issue_id}/labels/#{URI.encode(name)}"
                ) do
@@ -78,7 +80,7 @@ defmodule OdysseyElixir.GitHub.Adapter do
   end
 
   defp add_state_label(tracker, issue_id, state_name) do
-    case Client.rest_api("POST", "/repos/#{tracker.repo}/issues/#{issue_id}/labels", %{
+    case client_module().rest_api("POST", "/repos/#{tracker.repo}/issues/#{issue_id}/labels", %{
            "labels" => [state_name]
          }) do
       {:ok, _} -> :ok

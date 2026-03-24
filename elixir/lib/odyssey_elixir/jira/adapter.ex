@@ -7,14 +7,16 @@ defmodule OdysseyElixir.Jira.Adapter do
 
   alias OdysseyElixir.Jira.Client
 
+  defp client_module, do: Application.get_env(:odyssey_elixir, :jira_client_module, Client)
+
   @spec fetch_candidate_issues() :: {:ok, [term()]} | {:error, term()}
-  def fetch_candidate_issues, do: Client.fetch_candidate_issues()
+  def fetch_candidate_issues, do: client_module().fetch_candidate_issues()
 
   @spec fetch_issues_by_states([String.t()]) :: {:ok, [term()]} | {:error, term()}
-  def fetch_issues_by_states(states), do: Client.fetch_issues_by_states(states)
+  def fetch_issues_by_states(states), do: client_module().fetch_issues_by_states(states)
 
   @spec fetch_issue_states_by_ids([String.t()]) :: {:ok, [term()]} | {:error, term()}
-  def fetch_issue_states_by_ids(issue_ids), do: Client.fetch_issue_states_by_ids(issue_ids)
+  def fetch_issue_states_by_ids(issue_ids), do: client_module().fetch_issue_states_by_ids(issue_ids)
 
   @spec create_comment(String.t(), String.t()) :: :ok | {:error, term()}
   def create_comment(issue_id, body) when is_binary(issue_id) and is_binary(body) do
@@ -31,7 +33,7 @@ defmodule OdysseyElixir.Jira.Adapter do
       }
     }
 
-    case Client.rest_api("POST", "/rest/api/3/issue/#{issue_id}/comment", adf_body) do
+    case client_module().rest_api("POST", "/rest/api/3/issue/#{issue_id}/comment", adf_body) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end
@@ -41,7 +43,7 @@ defmodule OdysseyElixir.Jira.Adapter do
   def update_issue_state(issue_id, state_name)
       when is_binary(issue_id) and is_binary(state_name) do
     with {:ok, transition_id} <- find_transition(issue_id, state_name) do
-      case Client.rest_api("POST", "/rest/api/3/issue/#{issue_id}/transitions", %{
+      case client_module().rest_api("POST", "/rest/api/3/issue/#{issue_id}/transitions", %{
              "transition" => %{"id" => transition_id}
            }) do
         {:ok, _} -> :ok
@@ -51,7 +53,7 @@ defmodule OdysseyElixir.Jira.Adapter do
   end
 
   defp find_transition(issue_id, state_name) do
-    case Client.rest_api("GET", "/rest/api/3/issue/#{issue_id}/transitions") do
+    case client_module().rest_api("GET", "/rest/api/3/issue/#{issue_id}/transitions") do
       {:ok, %{"transitions" => transitions}} ->
         target = String.downcase(state_name)
 
