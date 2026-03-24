@@ -7,7 +7,7 @@ defmodule OdysseyElixir.PromptBuilder do
 
   @render_opts [strict_variables: true, strict_filters: true]
 
-  @spec build_prompt(OdysseyElixir.Linear.Issue.t(), keyword()) :: String.t()
+  @spec build_prompt(OdysseyElixir.Tracker.Issue.t(), keyword()) :: String.t()
   def build_prompt(issue, opts \\ []) do
     template =
       Workflow.current()
@@ -25,7 +25,7 @@ defmodule OdysseyElixir.PromptBuilder do
     |> IO.iodata_to_binary()
   end
 
-  @spec build_review_prompt(OdysseyElixir.Linear.Issue.t(), keyword()) :: String.t()
+  @spec build_review_prompt(OdysseyElixir.Tracker.Issue.t(), keyword()) :: String.t()
   def build_review_prompt(issue, opts \\ []) do
     template =
       Config.review_agent_prompt()

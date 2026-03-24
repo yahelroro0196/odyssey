@@ -4,7 +4,7 @@ defmodule OdysseyElixir.Linear.Client do
   """
 
   require Logger
-  alias OdysseyElixir.{Config, Linear.Issue}
+  alias OdysseyElixir.{Config, Tracker.Issue}
 
   @issue_page_size 50
   @max_error_body_log_bytes 1_000

@@ -1,6 +1,6 @@
-defmodule OdysseyElixir.Linear.Issue do
+defmodule OdysseyElixir.Tracker.Issue do
   @moduledoc """
-  Normalized Linear issue representation used by the orchestrator.
+  Normalized issue representation used by the orchestrator.
   """
 
   defstruct [

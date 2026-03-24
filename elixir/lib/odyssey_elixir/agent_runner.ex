@@ -4,7 +4,7 @@ defmodule OdysseyElixir.AgentRunner do
   """
 
   require Logger
-  alias OdysseyElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
+  alias OdysseyElixir.{Config, PromptBuilder, Tracker, Tracker.Issue, Workspace}
 
   @type worker_host :: String.t() | nil
 

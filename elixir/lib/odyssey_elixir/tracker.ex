@@ -39,6 +39,8 @@ defmodule OdysseyElixir.Tracker do
   @spec adapter() :: module()
   def adapter do
     case Config.settings!().tracker.kind do
+      "jira" -> OdysseyElixir.Jira.Adapter
+      "github" -> OdysseyElixir.GitHub.Adapter
       "memory" -> OdysseyElixir.Tracker.Memory
       _ -> OdysseyElixir.Linear.Adapter
     end

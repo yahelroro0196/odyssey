@@ -5,7 +5,7 @@ defmodule OdysseyElixir.Tracker.Memory do
 
   @behaviour OdysseyElixir.Tracker
 
-  alias OdysseyElixir.Linear.Issue
+  alias OdysseyElixir.Tracker.Issue
 
   @spec fetch_candidate_issues() :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_candidate_issues do

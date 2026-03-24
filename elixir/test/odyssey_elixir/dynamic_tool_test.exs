@@ -290,7 +290,7 @@ defmodule OdysseyElixir.Codex.DynamicToolTest do
 
     assert Jason.decode!(response["output"]) == %{
              "error" => %{
-               "message" => "Linear GraphQL tool execution failed.",
+               "message" => "Tool execution failed.",
                "reason" => ":boom"
              }
            }

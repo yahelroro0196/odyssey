@@ -12,7 +12,7 @@ defmodule OdysseyElixir.TestSupport do
       alias OdysseyElixir.Config
       alias OdysseyElixir.HttpServer
       alias OdysseyElixir.Linear.Client
-      alias OdysseyElixir.Linear.Issue
+      alias OdysseyElixir.Tracker.Issue
       alias OdysseyElixir.Orchestrator
       alias OdysseyElixir.PromptBuilder
       alias OdysseyElixir.StatusDashboard

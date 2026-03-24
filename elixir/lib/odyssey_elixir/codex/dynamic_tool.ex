@@ -3,7 +3,7 @@ defmodule OdysseyElixir.Codex.DynamicTool do
   Executes client-side tool calls requested by Codex app-server turns.
   """
 
-  alias OdysseyElixir.Linear.Client
+  alias OdysseyElixir.{Config, Linear.Client}
 
   @linear_graphql_tool "linear_graphql"
   @linear_graphql_description """
@@ -26,11 +26,67 @@ defmodule OdysseyElixir.Codex.DynamicTool do
     }
   }
 
+  @jira_api_tool "jira_api"
+  @jira_api_description """
+  Execute a REST API call against Jira using Odyssey's configured auth.
+  """
+  @jira_api_input_schema %{
+    "type" => "object",
+    "additionalProperties" => false,
+    "required" => ["method", "path"],
+    "properties" => %{
+      "method" => %{
+        "type" => "string",
+        "description" => "HTTP method (GET, POST, PUT, DELETE, PATCH)."
+      },
+      "path" => %{
+        "type" => "string",
+        "description" => "REST API path (e.g. /rest/api/3/issue/PROJ-1)."
+      },
+      "body" => %{
+        "type" => ["object", "null"],
+        "description" => "Optional JSON request body.",
+        "additionalProperties" => true
+      }
+    }
+  }
+
+  @github_api_tool "github_api"
+  @github_api_description """
+  Execute a REST API call against GitHub using Odyssey's configured auth.
+  """
+  @github_api_input_schema %{
+    "type" => "object",
+    "additionalProperties" => false,
+    "required" => ["method", "path"],
+    "properties" => %{
+      "method" => %{
+        "type" => "string",
+        "description" => "HTTP method (GET, POST, PUT, DELETE, PATCH)."
+      },
+      "path" => %{
+        "type" => "string",
+        "description" => "GitHub API path (e.g. /repos/owner/repo/issues/1)."
+      },
+      "body" => %{
+        "type" => ["object", "null"],
+        "description" => "Optional JSON request body.",
+        "additionalProperties" => true
+      }
+    }
+  }
+
   @spec execute(String.t() | nil, term(), keyword()) :: map()
   def execute(tool, arguments, opts \\ []) do
     case tool do
       @linear_graphql_tool ->
         execute_linear_graphql(arguments, opts)
+
+      @jira_api_tool ->
+        execute_jira_api(arguments)
+
+      @github_api_tool ->
+        execute_github_api(arguments)
 
       other ->
         failure_response(%{
@@ -44,13 +100,81 @@ defmodule OdysseyElixir.Codex.DynamicTool do
 
   @spec tool_specs() :: [map()]
   def tool_specs do
-    [
-      %{
-        "name" => @linear_graphql_tool,
-        "description" => @linear_graphql_description,
-        "inputSchema" => @linear_graphql_input_schema
-      }
-    ]
+    case Config.settings!().tracker.kind do
+      "jira" ->
+        [
+          %{
+            "name" => @jira_api_tool,
+            "description" => @jira_api_description,
+            "inputSchema" => @jira_api_input_schema
+          }
+        ]
+
+      "github" ->
+        [
+          %{
+            "name" => @github_api_tool,
+            "description" => @github_api_description,
+            "inputSchema" => @github_api_input_schema
+          }
+        ]
+
+      _ ->
+        [
+          %{
+            "name" => @linear_graphql_tool,
+            "description" => @linear_graphql_description,
+            "inputSchema" => @linear_graphql_input_schema
+          }
+        ]
+    end
+  end
+
+  defp execute_jira_api(arguments) when is_map(arguments) do
+    with {:ok, method} <- extract_string(arguments, "method"),
+         {:ok, path} <- extract_string(arguments, "path") do
+      body = Map.get(arguments, "body") || Map.get(arguments, :body)
+
+      case OdysseyElixir.Jira.Client.rest_api(method, path, body) do
+        {:ok, response} -> rest_api_response(response)
+        {:error, reason} -> failure_response(tool_error_payload(reason))
+      end
+    else
+      {:error, reason} -> failure_response(tool_error_payload(reason))
+    end
+  end
+
+  defp execute_jira_api(_arguments), do: failure_response(tool_error_payload(:invalid_arguments))
+
+  defp execute_github_api(arguments) when is_map(arguments) do
+    with {:ok, method} <- extract_string(arguments, "method"),
+         {:ok, path} <- extract_string(arguments, "path") do
+      body = Map.get(arguments, "body") || Map.get(arguments, :body)
+
+      case OdysseyElixir.GitHub.Client.rest_api(method, path, body) do
+        {:ok, response} -> rest_api_response(response)
+        {:error, reason} -> failure_response(tool_error_payload(reason))
+      end
+    else
+      {:error, reason} -> failure_response(tool_error_payload(reason))
+    end
+  end
+
+  defp execute_github_api(_arguments), do: failure_response(tool_error_payload(:invalid_arguments))
+
+  defp extract_string(map, key) do
+    value = Map.get(map, key) || Map.get(map, String.to_existing_atom(key))
+
+    case value do
+      v when is_binary(v) and v != "" -> {:ok, v}
+      _ -> {:error, {:missing_field, key}}
+    end
+  rescue
+    ArgumentError -> {:error, {:missing_field, key}}
+  end
+
+  defp rest_api_response(response) do
+    dynamic_tool_response(true, encode_payload(response))
   end
 
   defp execute_linear_graphql(arguments, opts) do
@@ -194,10 +318,54 @@ defmodule OdysseyElixir.Codex.DynamicTool do
     }
   end
 
+  defp tool_error_payload({:missing_field, field}) do
+    %{
+      "error" => %{
+        "message" => "Required field `#{field}` is missing or empty."
+      }
+    }
+  end
+
+  defp tool_error_payload({:jira_api_status, status}) do
+    %{
+      "error" => %{
+        "message" => "Jira API request failed with HTTP #{status}.",
+        "status" => status
+      }
+    }
+  end
+
+  defp tool_error_payload({:jira_api_request, reason}) do
+    %{
+      "error" => %{
+        "message" => "Jira API request failed.",
+        "reason" => inspect(reason)
+      }
+    }
+  end
+
+  defp tool_error_payload({:github_api_status, status}) do
+    %{
+      "error" => %{
+        "message" => "GitHub API request failed with HTTP #{status}.",
+        "status" => status
+      }
+    }
+  end
+
+  defp tool_error_payload({:github_api_request, reason}) do
+    %{
+      "error" => %{
+        "message" => "GitHub API request failed.",
+        "reason" => inspect(reason)
+      }
+    }
+  end
+
   defp tool_error_payload(reason) do
     %{
       "error" => %{
-        "message" => "Linear GraphQL tool execution failed.",
+        "message" => "Tool execution failed.",
         "reason" => inspect(reason)
       }
     }
