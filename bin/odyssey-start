@@ -10,6 +10,28 @@ WORKFLOW="${ODYSSEY_WORKFLOW:-${REPO_ROOT}/WORKFLOW.md}"
 LOG_DIR="${REPO_ROOT}/log"
 BACKGROUND=false
 
+run_mix() {
+  if command -v mise &>/dev/null; then
+    mise trust 2>/dev/null
+    mise exec -- mix "$@"
+  else
+    mix "$@"
+  fi
+}
+
+ensure_mix_deps() {
+  cd "$ODYSSEY_ELIXIR"
+
+  if run_mix deps.loadpaths >/dev/null 2>&1; then
+    cd "$REPO_ROOT"
+    return
+  fi
+
+  echo "Fetching dependencies..."
+  run_mix deps.get --quiet
+  cd "$REPO_ROOT"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port) PORT="$2"; shift 2 ;;
@@ -38,13 +60,7 @@ if [ ! -f "$WORKFLOW" ]; then
 fi
 
 # Ensure deps
-if [ ! -d "${ODYSSEY_ELIXIR}/deps" ]; then
-  echo "Fetching dependencies..."
-  cd "$ODYSSEY_ELIXIR"
-  if command -v mise &>/dev/null; then mise trust 2>/dev/null; mise exec -- mix deps.get --quiet
-  else mix deps.get --quiet; fi
-  cd "$REPO_ROOT"
-fi
+ensure_mix_deps
 
 # Check already running
 if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
