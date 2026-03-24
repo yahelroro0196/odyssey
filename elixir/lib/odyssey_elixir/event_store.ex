@@ -60,6 +60,7 @@ defmodule OdysseyElixir.EventStore do
     state = maybe_evict(state, issue_id)
 
     broadcast_event(issue_id, event)
+    Task.start(fn -> OdysseyElixir.Persistence.persist_event(issue_id, event) end)
     {:reply, :ok, state}
   end
 
