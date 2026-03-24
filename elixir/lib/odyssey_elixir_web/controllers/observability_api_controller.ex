@@ -8,6 +8,17 @@ defmodule OdysseyElixirWeb.ObservabilityApiController do
   alias OdysseyElixirWeb.{Endpoint, Presenter}
   alias Plug.Conn
 
+  @spec metrics(Conn.t(), map()) :: Conn.t()
+  def metrics(conn, _params) do
+    if prometheus_enabled?() do
+      conn
+      |> put_resp_content_type("text/plain")
+      |> send_resp(200, OdysseyElixir.MetricsReporter.scrape())
+    else
+      error_response(conn, 404, "not_found", "Prometheus metrics not enabled")
+    end
+  end
+
   @spec state(Conn.t(), map()) :: Conn.t()
   def state(conn, _params) do
     json(conn, Presenter.state_payload(orchestrator(), snapshot_timeout_ms()))
@@ -66,6 +77,41 @@ defmodule OdysseyElixirWeb.ObservabilityApiController do
       end
   end
 
+  @spec list_approvals(Conn.t(), map()) :: Conn.t()
+  def list_approvals(conn, _params) do
+    pending = OdysseyElixir.ApprovalStore.list_pending()
+
+    approvals =
+      Enum.map(pending, fn a ->
+        %{
+          id: a.id,
+          gate: a.gate,
+          issue_identifier: a.issue_identifier,
+          issue_title: a.issue_title,
+          requested_at: DateTime.to_iso8601(a.requested_at),
+          timeout_ms: a.timeout_ms
+        }
+      end)
+
+    json(conn, %{approvals: approvals})
+  end
+
+  @spec approve_gate(Conn.t(), map()) :: Conn.t()
+  def approve_gate(conn, %{"approval_id" => approval_id}) do
+    case OdysseyElixir.ApprovalStore.approve(String.to_integer(approval_id)) do
+      :ok -> json(conn, %{status: "approved", approval_id: String.to_integer(approval_id)})
+      {:error, :not_found} -> error_response(conn, 404, "not_found", "Approval not found")
+    end
+  end
+
+  @spec reject_gate(Conn.t(), map()) :: Conn.t()
+  def reject_gate(conn, %{"approval_id" => approval_id}) do
+    case OdysseyElixir.ApprovalStore.reject(String.to_integer(approval_id)) do
+      :ok -> json(conn, %{status: "rejected", approval_id: String.to_integer(approval_id)})
+      {:error, :not_found} -> error_response(conn, 404, "not_found", "Approval not found")
+    end
+  end
+
   @spec method_not_allowed(Conn.t(), map()) :: Conn.t()
   def method_not_allowed(conn, _params) do
     error_response(conn, 405, "method_not_allowed", "Method not allowed")
@@ -88,5 +134,14 @@ defmodule OdysseyElixirWeb.ObservabilityApiController do
 
   defp snapshot_timeout_ms do
     Endpoint.config(:snapshot_timeout_ms) || 15_000
+  end
+
+  defp prometheus_enabled? do
+    case OdysseyElixir.Config.settings!() do
+      %{observability: %{prometheus_enabled: true}} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
   end
 end

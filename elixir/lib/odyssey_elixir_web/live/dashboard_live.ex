@@ -19,6 +19,7 @@ defmodule OdysseyElixirWeb.DashboardLive do
     if connected?(socket) do
       :ok = ObservabilityPubSub.subscribe()
       :ok = OdysseyElixir.WorkflowStore.subscribe_config()
+      Phoenix.PubSub.subscribe(OdysseyElixir.PubSub, "approvals:updates")
       schedule_runtime_tick()
     end
 
@@ -33,6 +34,14 @@ defmodule OdysseyElixirWeb.DashboardLive do
 
   @impl true
   def handle_info(:observability_updated, socket) do
+    {:noreply,
+     socket
+     |> assign(:payload, load_payload())
+     |> assign(:now, DateTime.utc_now())}
+  end
+
+  @impl true
+  def handle_info({:approvals_updated}, socket) do
     {:noreply,
      socket
      |> assign(:payload, load_payload())
@@ -121,6 +130,24 @@ defmodule OdysseyElixirWeb.DashboardLive do
             <p class="metric-value numeric"><%= format_runtime_seconds(total_runtime_seconds(@payload, @now)) %></p>
             <p class="metric-detail">Total Codex runtime across completed and active sessions.</p>
           </article>
+
+          <article class="metric-card">
+            <p class="metric-label">Estimated Cost</p>
+            <p class="metric-value numeric"><%= format_cost(@payload.cost) %></p>
+            <p class="metric-detail">Based on configured token rates.</p>
+          </article>
+
+          <article class="metric-card">
+            <p class="metric-label">Budget</p>
+            <p class="metric-value numeric"><%= budget_summary(@payload.budget_status) %></p>
+            <p class="metric-detail">
+              <%= if Map.get(@payload.budget_status, :paused, false) do %>
+                <span class="state-badge state-badge-danger">Paused</span>
+              <% else %>
+                Daily token usage vs limit.
+              <% end %>
+            </p>
+          </article>
         </section>
 
         <section class="section-card">
@@ -156,6 +183,7 @@ defmodule OdysseyElixirWeb.DashboardLive do
                   <col style="width: 8.5rem;" />
                   <col />
                   <col style="width: 10rem;" />
+                  <col style="width: 8rem;" />
                   <col style="width: 5rem;" />
                 </colgroup>
                 <thead>
@@ -168,6 +196,7 @@ defmodule OdysseyElixirWeb.DashboardLive do
                     <th>Runtime / turns</th>
                     <th>Codex update</th>
                     <th>Tokens</th>
+                    <th>Budget</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -235,6 +264,16 @@ defmodule OdysseyElixirWeb.DashboardLive do
                       </div>
                     </td>
                     <td>
+                      <%= if entry.budget.max_tokens do %>
+                        <div class="token-stack numeric">
+                          <span><%= format_int(entry.budget.remaining) %> / <%= format_int(entry.budget.max_tokens) %></span>
+                          <span class={"muted" <> if(entry.budget.warning, do: " state-badge-danger", else: "")}><%= entry.budget.pct_used %>% used</span>
+                        </div>
+                      <% else %>
+                        <span class="muted">unlimited</span>
+                      <% end %>
+                    </td>
+                    <td>
                       <button
                         type="button"
                         class="cancel-button"
@@ -242,6 +281,45 @@ defmodule OdysseyElixirWeb.DashboardLive do
                       >
                         Cancel
                       </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Pending approvals</h2>
+              <p class="section-copy">Issues awaiting human approval before proceeding.</p>
+            </div>
+          </div>
+
+          <%= if @payload[:pending_approvals] == nil or @payload[:pending_approvals] == [] do %>
+            <p class="empty-state">No pending approvals.</p>
+          <% else %>
+            <div class="table-wrap">
+              <table class="data-table" style="min-width: 680px;">
+                <thead>
+                  <tr>
+                    <th>Issue</th>
+                    <th>Gate</th>
+                    <th>Requested at</th>
+                    <th>Timeout</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={approval <- @payload.pending_approvals}>
+                    <td><span class="issue-id"><%= approval.issue_identifier %></span></td>
+                    <td><span class="state-badge state-badge-warning"><%= approval.gate %></span></td>
+                    <td class="mono"><%= format_approval_time(approval.requested_at) %></td>
+                    <td class="mono"><%= div(approval.timeout_ms, 1000) %>s</td>
+                    <td>
+                      <button type="button" class="cancel-button" style="background: #22c55e; border-color: #16a34a;" phx-click="approve" phx-value-id={approval.id}>Approve</button>
+                      <button type="button" class="cancel-button" phx-click="reject" phx-value-id={approval.id}>Reject</button>
                     </td>
                   </tr>
                 </tbody>
@@ -390,4 +468,38 @@ defmodule OdysseyElixirWeb.DashboardLive do
   end
 
   defp format_reload_time(_), do: ""
+
+  defp format_cost(%{estimated: nil}), do: "n/a"
+
+  defp format_cost(%{estimated: amount, currency: currency}) do
+    "$#{:erlang.float_to_binary(amount / 1, decimals: 4)} #{currency}"
+  end
+
+  defp format_cost(_), do: "n/a"
+
+  defp budget_summary(%{daily_limit: nil}), do: "unlimited"
+
+  defp budget_summary(%{daily_used: used, daily_limit: limit}) do
+    "#{format_int(used)} / #{format_int(limit)}"
+  end
+
+  defp budget_summary(_), do: "n/a"
+
+  @impl true
+  def handle_event("approve", %{"id" => id}, socket) do
+    OdysseyElixir.ApprovalStore.approve(String.to_integer(id))
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("reject", %{"id" => id}, socket) do
+    OdysseyElixir.ApprovalStore.reject(String.to_integer(id))
+    {:noreply, socket}
+  end
+
+  defp format_approval_time(%DateTime{} = dt) do
+    dt |> DateTime.truncate(:second) |> Calendar.strftime("%H:%M:%S")
+  end
+
+  defp format_approval_time(_), do: "n/a"
 end

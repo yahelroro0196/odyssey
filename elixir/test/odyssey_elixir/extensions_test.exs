@@ -358,7 +358,13 @@ defmodule OdysseyElixir.ExtensionsTest do
                  "last_event_at" => nil,
                  "tokens" => %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12},
                  "pr_url" => nil,
-                 "role" => "coder"
+                 "role" => "coder",
+                 "budget" => %{
+                   "max_tokens" => nil,
+                   "remaining" => nil,
+                   "pct_used" => 0,
+                   "warning" => false
+                 }
                }
              ],
              "retrying" => [
@@ -379,7 +385,10 @@ defmodule OdysseyElixir.ExtensionsTest do
                "seconds_running" => 42.5
              },
              "rate_limits" => %{"primary" => %{"remaining" => 11}},
-             "config" => state_payload["config"]
+             "config" => state_payload["config"],
+             "cost" => state_payload["cost"],
+             "budget_status" => state_payload["budget_status"],
+             "pending_approvals" => state_payload["pending_approvals"]
            }
 
     conn = get(build_conn(), "/api/v1/MT-HTTP")

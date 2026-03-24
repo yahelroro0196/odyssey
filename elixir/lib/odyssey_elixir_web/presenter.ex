@@ -21,7 +21,10 @@ defmodule OdysseyElixirWeb.Presenter do
           retrying: Enum.map(snapshot.retrying, &retry_entry_payload/1),
           agent_totals: snapshot.agent_totals,
           rate_limits: snapshot.rate_limits,
-          config: config_reload_payload()
+          config: config_reload_payload(),
+          cost: compute_cost(snapshot.agent_totals),
+          budget_status: Map.get(snapshot, :budget_status, %{}),
+          pending_approvals: Map.get(snapshot, :pending_approvals, [])
         }
 
       :timeout ->
@@ -131,7 +134,8 @@ defmodule OdysseyElixirWeb.Presenter do
         total_tokens: entry.agent_total_tokens
       },
       pr_url: Map.get(entry, :pr_url),
-      role: Map.get(entry, :role, :coder)
+      role: Map.get(entry, :role, :coder),
+      budget: entry_budget(entry)
     }
   end
 
@@ -226,5 +230,47 @@ defmodule OdysseyElixirWeb.Presenter do
       _ ->
         %{last_reloaded_at: nil, last_changed_sections: [], reload_count: 0}
     end
+  end
+
+  defp entry_budget(entry) do
+    role = Map.get(entry, :role, :coder)
+    max = Config.agent_codex_config(role).max_tokens_per_agent
+    total = entry.agent_total_tokens
+
+    case max do
+      nil ->
+        %{max_tokens: nil, remaining: nil, pct_used: 0, warning: false}
+
+      max when is_integer(max) and max > 0 ->
+        %{
+          max_tokens: max,
+          remaining: max(max - total, 0),
+          pct_used: div(total * 100, max),
+          warning: Map.get(entry, :budget_warning_emitted, false)
+        }
+
+      _ ->
+        %{max_tokens: nil, remaining: nil, pct_used: 0, warning: false}
+    end
+  end
+
+  defp compute_cost(agent_totals) do
+    budget = Config.settings!().budget
+    input_rate = budget.cost_per_1k_input_tokens
+    output_rate = budget.cost_per_1k_output_tokens
+    currency = budget.currency || "USD"
+
+    estimated =
+      case {input_rate, output_rate} do
+        {ir, or_} when is_number(ir) and is_number(or_) ->
+          ir * agent_totals.input_tokens / 1_000 + or_ * agent_totals.output_tokens / 1_000
+
+        _ ->
+          nil
+      end
+
+    %{estimated: estimated, currency: currency}
+  rescue
+    _ -> %{estimated: nil, currency: "USD"}
   end
 end

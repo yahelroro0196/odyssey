@@ -140,6 +140,16 @@ defmodule OdysseyElixir.Config do
     end
   end
 
+  @spec approval_gate_enabled?(atom()) :: boolean()
+  def approval_gate_enabled?(gate) when gate in [:before_dispatch, :before_merge] do
+    settings = settings!()
+
+    case Map.get(settings, :approval_gates) do
+      %{^gate => true} -> true
+      _ -> false
+    end
+  end
+
   @spec validate!() :: :ok | {:error, term()}
   def validate! do
     with {:ok, settings} <- settings() do
@@ -168,7 +178,7 @@ defmodule OdysseyElixir.Config do
       is_nil(settings.tracker.kind) ->
         {:error, :missing_tracker_kind}
 
-      settings.tracker.kind not in ["linear", "memory"] ->
+      settings.tracker.kind not in ["linear", "jira", "github", "memory"] ->
         {:error, {:unsupported_tracker_kind, settings.tracker.kind}}
 
       settings.tracker.kind == "linear" and not is_binary(settings.tracker.api_key) ->
@@ -176,6 +186,21 @@ defmodule OdysseyElixir.Config do
 
       settings.tracker.kind == "linear" and not is_binary(settings.tracker.project_slug) ->
         {:error, :missing_linear_project_slug}
+
+      settings.tracker.kind == "jira" and not is_binary(settings.tracker.api_key) ->
+        {:error, :missing_jira_api_token}
+
+      settings.tracker.kind == "jira" and not is_binary(settings.tracker.base_url) ->
+        {:error, :missing_jira_base_url}
+
+      settings.tracker.kind == "jira" and not is_binary(settings.tracker.project_key) ->
+        {:error, :missing_jira_project_key}
+
+      settings.tracker.kind == "github" and not is_binary(settings.tracker.api_key) ->
+        {:error, :missing_github_token}
+
+      settings.tracker.kind == "github" and not is_binary(settings.tracker.repo) ->
+        {:error, :missing_github_repo}
 
       true ->
         :ok

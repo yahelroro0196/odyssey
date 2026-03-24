@@ -7,8 +7,8 @@ defmodule OdysseyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias OdysseyElixir.{AgentRunner, Config, EventStore, Notifier, StatusDashboard, Tracker, Workspace}
-  alias OdysseyElixir.Linear.Issue
+  alias OdysseyElixir.{AgentRunner, ApprovalStore, Config, EventStore, Notifier, Persistence, StatusDashboard, Tracker, Workspace}
+  alias OdysseyElixir.Tracker.Issue
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -38,7 +38,11 @@ defmodule OdysseyElixir.Orchestrator do
       claimed: MapSet.new(),
       retry_attempts: %{},
       agent_totals: nil,
-      agent_rate_limits: nil
+      agent_rate_limits: nil,
+      daily_tokens: 0,
+      daily_tokens_date: nil,
+      budget_paused: false,
+      pending_approvals: %{}
     ]
   end
 
@@ -50,8 +54,19 @@ defmodule OdysseyElixir.Orchestrator do
 
   @impl true
   def init(_opts) do
+    Process.flag(:trap_exit, true)
     now_ms = System.monotonic_time(:millisecond)
     config = Config.settings!()
+
+    recovered_retries = safe_persistence_call(fn -> Persistence.load_retry_queue() end, %{})
+    recovered_totals = safe_persistence_call(fn -> Persistence.global_totals() end, %{})
+
+    agent_totals =
+      Map.merge(@empty_agent_totals, %{
+        input_tokens: Map.get(recovered_totals, :input_tokens, 0),
+        output_tokens: Map.get(recovered_totals, :output_tokens, 0),
+        total_tokens: Map.get(recovered_totals, :total_tokens, 0)
+      })
 
     state = %State{
       poll_interval_ms: config.polling.interval_ms,
@@ -60,8 +75,9 @@ defmodule OdysseyElixir.Orchestrator do
       poll_check_in_progress: false,
       tick_timer_ref: nil,
       tick_token: nil,
-      agent_totals: @empty_agent_totals,
-      agent_rate_limits: nil
+      agent_totals: agent_totals,
+      agent_rate_limits: nil,
+      retry_attempts: seed_retry_attempts(recovered_retries)
     }
 
     run_terminal_workspace_cleanup()
@@ -135,14 +151,32 @@ defmodule OdysseyElixir.Orchestrator do
             :normal ->
               Logger.info("Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; scheduling active-state continuation check")
 
-              state
-              |> complete_issue(issue_id)
-              |> schedule_issue_retry(issue_id, 1, %{
-                identifier: running_entry.identifier,
-                delay_type: :continuation,
-                worker_host: Map.get(running_entry, :worker_host),
-                workspace_path: Map.get(running_entry, :workspace_path)
-              })
+              if Config.approval_gate_enabled?(:before_merge) do
+                {:ok, approval_id} =
+                  ApprovalStore.request_approval(:before_merge, running_entry.issue, %{
+                    running_entry: running_entry,
+                    orchestrator_pid: self()
+                  })
+
+                :telemetry.execute([:odyssey, :approvals, :requested], %{count: 1}, %{gate: :before_merge})
+
+                state = complete_issue(state, issue_id)
+
+                put_in(state.pending_approvals[approval_id], %{
+                  gate: :before_merge,
+                  issue_id: issue_id,
+                  running_entry: running_entry
+                })
+              else
+                state
+                |> complete_issue(issue_id)
+                |> schedule_issue_retry(issue_id, 1, %{
+                  identifier: running_entry.identifier,
+                  delay_type: :continuation,
+                  worker_host: Map.get(running_entry, :worker_host),
+                  workspace_path: Map.get(running_entry, :workspace_path)
+                })
+              end
 
             _ ->
               Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
@@ -160,11 +194,41 @@ defmodule OdysseyElixir.Orchestrator do
         Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
 
         case reason do
-          :normal -> Notifier.notify(running_entry.identifier, :completed, %{session_id: session_id})
-          _ -> Notifier.notify(running_entry.identifier, :failed, %{session_id: session_id, reason: inspect(reason)})
+          :normal ->
+            :telemetry.execute([:odyssey, :issues, :completed], %{count: 1}, %{state: running_entry.issue.state})
+
+            duration_seconds =
+              DateTime.diff(DateTime.utc_now(), running_entry.started_at, :second)
+
+            :telemetry.execute([:odyssey, :agent, :duration], %{seconds: duration_seconds}, %{})
+            Notifier.notify(running_entry.identifier, :completed, %{session_id: session_id})
+
+          _ ->
+            :telemetry.execute([:odyssey, :issues, :failed], %{count: 1}, %{})
+            Notifier.notify(running_entry.identifier, :failed, %{session_id: session_id, reason: inspect(reason)})
         end
 
         EventStore.clear(issue_id)
+        emit_gauge_metrics(state)
+        notify_dashboard()
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:approval_resolved, approval_id, decision, _metadata}, %State{} = state) do
+    case Map.pop(state.pending_approvals, approval_id) do
+      {nil, _approvals} ->
+        {:noreply, state}
+
+      {approval, pending_approvals} ->
+        state = %{state | pending_approvals: pending_approvals}
+
+        :telemetry.execute([:odyssey, :approvals, :resolved], %{count: 1}, %{
+          gate: approval.gate,
+          decision: decision
+        })
+
+        state = handle_approval_decision(state, approval, decision)
         notify_dashboard()
         {:noreply, state}
     end
@@ -199,14 +263,32 @@ defmodule OdysseyElixir.Orchestrator do
         {updated_running_entry, token_delta} = integrate_agent_update(running_entry, update)
         EventStore.push(issue_id, update)
 
+        maybe_persist_session_start(running_entry, updated_running_entry, issue_id)
+
+        if Map.get(updated_running_entry, :turn_count, 0) != Map.get(running_entry, :turn_count, 0) do
+          :telemetry.execute([:odyssey, :agent, :turns], %{count: 1}, %{role: Map.get(running_entry, :role, "default")})
+        end
+
+        if token_delta.input_tokens > 0 do
+          :telemetry.execute([:odyssey, :tokens], %{total: token_delta.input_tokens}, %{type: "input"})
+        end
+
+        if token_delta.output_tokens > 0 do
+          :telemetry.execute([:odyssey, :tokens], %{total: token_delta.output_tokens}, %{type: "output"})
+        end
+
         state =
           state
           |> apply_agent_token_delta(token_delta)
           |> apply_agent_rate_limits(update)
+          |> maybe_enforce_global_budget()
+
+        persist_token_delta(issue_id, updated_running_entry.session_id, token_delta)
 
         state = %{state | running: Map.put(running, issue_id, updated_running_entry)}
         state = maybe_enforce_token_budget(state, issue_id, updated_running_entry)
 
+        emit_gauge_metrics(state)
         notify_dashboard()
         {:noreply, state}
     end
@@ -232,6 +314,10 @@ defmodule OdysseyElixir.Orchestrator do
     {:noreply, state}
   end
 
+  defp maybe_dispatch(%State{budget_paused: true} = state) do
+    reconcile_running_issues(state)
+  end
+
   defp maybe_dispatch(%State{} = state) do
     state = reconcile_running_issues(state)
 
@@ -246,6 +332,26 @@ defmodule OdysseyElixir.Orchestrator do
 
       {:error, :missing_linear_project_slug} ->
         Logger.error("Linear project slug missing in WORKFLOW.md")
+        state
+
+      {:error, :missing_jira_api_token} ->
+        Logger.error("Jira API token missing in WORKFLOW.md")
+        state
+
+      {:error, :missing_jira_base_url} ->
+        Logger.error("Jira base URL missing in WORKFLOW.md")
+        state
+
+      {:error, :missing_jira_project_key} ->
+        Logger.error("Jira project key missing in WORKFLOW.md")
+        state
+
+      {:error, :missing_github_token} ->
+        Logger.error("GitHub token missing in WORKFLOW.md")
+        state
+
+      {:error, :missing_github_repo} ->
+        Logger.error("GitHub repo missing in WORKFLOW.md")
         state
 
       {:error, :missing_tracker_kind} ->
@@ -275,7 +381,7 @@ defmodule OdysseyElixir.Orchestrator do
         state
 
       {:error, reason} ->
-        Logger.error("Failed to fetch from Linear: #{inspect(reason)}")
+        Logger.error("Failed to fetch from tracker: #{inspect(reason)}")
         state
 
       false ->
@@ -430,6 +536,7 @@ defmodule OdysseyElixir.Orchestrator do
 
       %{pid: pid, ref: ref, identifier: identifier} = running_entry ->
         state = record_session_completion_totals(state, running_entry)
+        persist_session_end(running_entry, "cancelled")
         worker_host = Map.get(running_entry, :worker_host)
 
         if cleanup_workspace do
@@ -699,7 +806,27 @@ defmodule OdysseyElixir.Orchestrator do
         state
 
       worker_host ->
-        spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host)
+        if Config.approval_gate_enabled?(:before_dispatch) do
+          {:ok, approval_id} =
+            ApprovalStore.request_approval(:before_dispatch, issue, %{
+              attempt: attempt,
+              worker_host: worker_host,
+              orchestrator_pid: self()
+            })
+
+          :telemetry.execute([:odyssey, :approvals, :requested], %{count: 1}, %{gate: :before_dispatch})
+
+          state = put_in(state.pending_approvals[approval_id], %{
+            gate: :before_dispatch,
+            issue: issue,
+            attempt: attempt,
+            worker_host: worker_host
+          })
+
+          %{state | claimed: MapSet.put(state.claimed, issue.id)}
+        else
+          spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host)
+        end
     end
   end
 
@@ -739,6 +866,8 @@ defmodule OdysseyElixir.Orchestrator do
             retry_attempt: normalize_retry_attempt(attempt),
             started_at: DateTime.utc_now()
           })
+
+        :telemetry.execute([:odyssey, :issues, :dispatched], %{count: 1}, %{state: issue.state, role: role})
 
         %{
           state
@@ -810,7 +939,7 @@ defmodule OdysseyElixir.Orchestrator do
 
     Logger.warning("Retrying issue_id=#{issue_id} issue_identifier=#{identifier} in #{delay_ms}ms (attempt #{next_attempt})#{error_suffix}")
 
-    %{
+    new_state = %{
       state
       | retry_attempts:
           Map.put(state.retry_attempts, issue_id, %{
@@ -824,6 +953,9 @@ defmodule OdysseyElixir.Orchestrator do
             workspace_path: workspace_path
           })
     }
+
+    fire_and_forget(fn -> Persistence.save_retry_queue(new_state.retry_attempts) end)
+    new_state
   end
 
   defp pop_retry_attempt_state(%State{} = state, issue_id, retry_token) when is_reference(retry_token) do
@@ -915,6 +1047,37 @@ defmodule OdysseyElixir.Orchestrator do
 
   defp notify_dashboard do
     StatusDashboard.notify_update()
+  end
+
+  defp handle_approval_decision(state, %{gate: :before_dispatch} = approval, :approved) do
+    recipient = self()
+    spawn_issue_on_worker_host(state, approval.issue, approval.attempt, recipient, approval.worker_host)
+  end
+
+  defp handle_approval_decision(state, %{gate: :before_dispatch} = approval, :rejected) do
+    Logger.info("Approval rejected for before_dispatch gate issue=#{approval.issue.identifier}")
+    %{state | claimed: MapSet.delete(state.claimed, approval.issue.id)}
+  end
+
+  defp handle_approval_decision(state, %{gate: :before_merge} = approval, :approved) do
+    running_entry = approval.running_entry
+
+    schedule_issue_retry(state, approval.issue_id, 1, %{
+      identifier: running_entry.identifier,
+      delay_type: :continuation,
+      worker_host: Map.get(running_entry, :worker_host),
+      workspace_path: Map.get(running_entry, :workspace_path)
+    })
+  end
+
+  defp handle_approval_decision(state, %{gate: :before_merge} = approval, :rejected) do
+    Logger.info("Approval rejected for before_merge gate issue_id=#{approval.issue_id}")
+    %{state | claimed: MapSet.delete(state.claimed, approval.issue_id)}
+  end
+
+  defp emit_gauge_metrics(%State{} = state) do
+    :telemetry.execute([:odyssey, :concurrent_agents], %{count: map_size(state.running)}, %{})
+    :telemetry.execute([:odyssey, :retry_queue], %{size: map_size(state.retry_attempts)}, %{})
   end
 
   defp handle_active_retry(state, issue, attempt, metadata) do
@@ -1169,6 +1332,8 @@ defmodule OdysseyElixir.Orchestrator do
         }
       end)
 
+    budget_config = Config.settings!().budget
+
     {:reply,
      %{
        running: running,
@@ -1179,7 +1344,13 @@ defmodule OdysseyElixir.Orchestrator do
          checking?: state.poll_check_in_progress == true,
          next_poll_in_ms: next_poll_in_ms(state.next_poll_due_at_ms, now_ms),
          poll_interval_ms: state.poll_interval_ms
-       }
+       },
+       budget_status: %{
+         daily_used: state.daily_tokens,
+         daily_limit: budget_config.daily_token_limit,
+         paused: state.budget_paused
+       },
+       pending_approvals: ApprovalStore.list_pending()
      }, state}
   end
 
@@ -1214,25 +1385,112 @@ defmodule OdysseyElixir.Orchestrator do
 
   defp maybe_enforce_token_budget(state, issue_id, running_entry) do
     role = Map.get(running_entry, :role, :coder)
+    codex_config = Config.agent_codex_config(role)
 
-    case Config.agent_codex_config(role).max_tokens_per_agent do
+    case codex_config.max_tokens_per_agent do
       nil ->
         state
 
       max when is_integer(max) and max > 0 ->
-        if running_entry.agent_total_tokens > max do
-          Logger.warning("Token budget exceeded for issue_id=#{issue_id} identifier=#{running_entry.identifier} tokens=#{running_entry.agent_total_tokens} budget=#{max}; terminating agent")
+        total = running_entry.agent_total_tokens
+        warning_pct = Map.get(codex_config, :budget_warning_pct) || 80
+        warning_at = div(max * warning_pct, 100)
 
-          Notifier.notify(running_entry.identifier, :budget_exceeded, %{tokens: running_entry.agent_total_tokens, budget: max})
+        cond do
+          total > max ->
+            Logger.warning("Token budget exceeded for issue_id=#{issue_id} identifier=#{running_entry.identifier} tokens=#{total} budget=#{max}; terminating agent")
 
+            Notifier.notify(running_entry.identifier, :budget_exceeded, %{tokens: total, budget: max})
+
+            state
+            |> terminate_running_issue(issue_id, false)
+            |> schedule_issue_retry(issue_id, nil, %{
+              identifier: running_entry.identifier,
+              error: "token budget exceeded (#{total}/#{max})",
+              worker_host: Map.get(running_entry, :worker_host),
+              workspace_path: Map.get(running_entry, :workspace_path)
+            })
+
+          total > warning_at and not Map.get(running_entry, :budget_warning_emitted, false) ->
+            Logger.warning("Token budget warning for issue_id=#{issue_id} identifier=#{running_entry.identifier} tokens=#{total} warning_at=#{warning_at} budget=#{max}")
+
+            Notifier.notify(running_entry.identifier, :budget_warning, %{
+              tokens: total,
+              warning_at: warning_at,
+              budget: max,
+              pct_used: div(total * 100, max)
+            })
+
+            updated_entry = Map.put(running_entry, :budget_warning_emitted, true)
+            %{state | running: Map.put(state.running, issue_id, updated_entry)}
+
+          true ->
+            state
+        end
+
+      _ ->
+        state
+    end
+  end
+
+  defp maybe_enforce_global_budget(%{agent_totals: agent_totals} = state) do
+    today = Date.utc_today()
+    config = Config.settings!()
+
+    daily_tokens =
+      if Persistence.sqlite?() do
+        Map.get(safe_persistence_call(fn -> Persistence.daily_token_total(today) end, %{}), :total_tokens, 0)
+      else
+        agent_totals.total_tokens
+      end
+
+    state =
+      if state.daily_tokens_date == today do
+        %{state | daily_tokens: daily_tokens}
+      else
+        %{state | daily_tokens: daily_tokens, daily_tokens_date: today}
+      end
+
+    state = check_daily_budget(state, config)
+    check_weekly_budget(state, config)
+  end
+
+  defp check_daily_budget(state, config) do
+    case config.budget.daily_token_limit do
+      nil ->
+        state
+
+      limit when is_integer(limit) and limit > 0 ->
+        if state.daily_tokens >= limit and not state.budget_paused do
+          Logger.warning("Daily token budget exceeded: #{state.daily_tokens}/#{limit}; pausing dispatch")
+          Notifier.notify("global", :budget_exceeded, %{daily_used: state.daily_tokens, daily_limit: limit})
+          %{state | budget_paused: true}
+        else
           state
-          |> terminate_running_issue(issue_id, false)
-          |> schedule_issue_retry(issue_id, nil, %{
-            identifier: running_entry.identifier,
-            error: "token budget exceeded (#{running_entry.agent_total_tokens}/#{max})",
-            worker_host: Map.get(running_entry, :worker_host),
-            workspace_path: Map.get(running_entry, :workspace_path)
-          })
+        end
+
+      _ ->
+        state
+    end
+  end
+
+  defp check_weekly_budget(state, config) do
+    case config.budget.weekly_token_limit do
+      nil ->
+        state
+
+      limit when is_integer(limit) and limit > 0 and not state.budget_paused ->
+        weekly_total =
+          if Persistence.sqlite?() do
+            Map.get(safe_persistence_call(fn -> Persistence.weekly_token_total() end, %{}), :total_tokens, 0)
+          else
+            state.daily_tokens
+          end
+
+        if weekly_total >= limit do
+          Logger.warning("Weekly token budget exceeded: #{weekly_total}/#{limit}; pausing dispatch")
+          Notifier.notify("global", :budget_exceeded, %{weekly_used: weekly_total, weekly_limit: limit})
+          %{state | budget_paused: true}
         else
           state
         end
@@ -1363,6 +1621,8 @@ defmodule OdysseyElixir.Orchestrator do
 
   defp record_session_completion_totals(state, running_entry) when is_map(running_entry) do
     runtime_seconds = running_seconds(running_entry.started_at, DateTime.utc_now())
+
+    persist_session_end(running_entry, "completed")
 
     agent_totals =
       apply_token_delta(
@@ -1771,4 +2031,89 @@ defmodule OdysseyElixir.Orchestrator do
   end
 
   defp integer_like(_value), do: nil
+
+  # --- Persistence helpers ---
+
+  @impl true
+  def terminate(_reason, state) do
+    Enum.each(state.running, fn {_issue_id, running_entry} ->
+      persist_session_end(running_entry, "interrupted")
+    end)
+
+    if map_size(state.retry_attempts) > 0 do
+      safe_persistence_call(fn -> Persistence.save_retry_queue(state.retry_attempts) end, :ok)
+    end
+
+    :ok
+  end
+
+  defp maybe_persist_session_start(old_entry, new_entry, issue_id) do
+    old_session = Map.get(old_entry, :session_id)
+    new_session = Map.get(new_entry, :session_id)
+
+    if new_session != nil and new_session != old_session do
+      fire_and_forget(fn ->
+        Persistence.record_session_start(%{
+          id: new_session,
+          issue_id: issue_id,
+          started_at: Map.get(new_entry, :started_at, DateTime.utc_now())
+        })
+      end)
+    end
+  end
+
+  defp persist_session_end(running_entry, status) do
+    session_id = Map.get(running_entry, :session_id)
+
+    if session_id do
+      fire_and_forget(fn ->
+        Persistence.record_session_end(session_id, %{
+          status: status,
+          input_tokens: Map.get(running_entry, :agent_input_tokens, 0),
+          output_tokens: Map.get(running_entry, :agent_output_tokens, 0),
+          total_tokens: Map.get(running_entry, :agent_total_tokens, 0),
+          turn_count: Map.get(running_entry, :turn_count, 0)
+        })
+      end)
+    end
+  end
+
+  defp persist_token_delta(issue_id, session_id, token_delta) do
+    if token_delta.total_tokens > 0 do
+      fire_and_forget(fn -> Persistence.record_token_delta(issue_id, session_id, token_delta) end)
+    end
+  end
+
+  defp fire_and_forget(fun) do
+    Task.start(fun)
+  end
+
+  defp safe_persistence_call(fun, default) do
+    fun.()
+  rescue
+    e ->
+      Logger.warning("Persistence call failed: #{inspect(e)}")
+      default
+  end
+
+  defp seed_retry_attempts(recovered) when is_map(recovered) and map_size(recovered) > 0 do
+    Enum.reduce(recovered, %{}, fn {issue_id, entry}, acc ->
+      retry_token = make_ref()
+      delay_ms = retry_delay(Map.get(entry, :attempt, 1), entry)
+      timer_ref = Process.send_after(self(), {:retry_issue, issue_id, retry_token}, delay_ms)
+
+      Map.put(acc, issue_id, %{
+        attempt: Map.get(entry, :attempt, 1),
+        timer_ref: timer_ref,
+        retry_token: retry_token,
+        due_at_ms: System.monotonic_time(:millisecond) + delay_ms,
+        identifier: Map.get(entry, :identifier),
+        error: Map.get(entry, :error),
+        worker_host: Map.get(entry, :worker_host),
+        workspace_path: Map.get(entry, :workspace_path)
+      })
+    end)
+  end
+
+  defp seed_retry_attempts(_), do: %{}
 end

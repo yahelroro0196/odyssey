@@ -46,12 +46,17 @@ defmodule OdysseyElixir.Config.Schema do
 
     embedded_schema do
       field(:kind, :string)
-      field(:endpoint, :string, default: "https://api.linear.app/graphql")
+      field(:endpoint, :string)
       field(:api_key, :string)
       field(:project_slug, :string)
       field(:assignee, :string)
       field(:active_states, {:array, :string}, default: ["Todo", "In Progress"])
       field(:terminal_states, {:array, :string}, default: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"])
+      field(:base_url, :string)
+      field(:project_key, :string)
+      field(:jql_filter, :string)
+      field(:email, :string)
+      field(:repo, :string)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -59,7 +64,20 @@ defmodule OdysseyElixir.Config.Schema do
       schema
       |> cast(
         attrs,
-        [:kind, :endpoint, :api_key, :project_slug, :assignee, :active_states, :terminal_states],
+        [
+          :kind,
+          :endpoint,
+          :api_key,
+          :project_slug,
+          :assignee,
+          :active_states,
+          :terminal_states,
+          :base_url,
+          :project_key,
+          :jql_filter,
+          :email,
+          :repo
+        ],
         empty_values: []
       )
     end
@@ -177,6 +195,7 @@ defmodule OdysseyElixir.Config.Schema do
       field(:read_timeout_ms, :integer, default: 5_000)
       field(:stall_timeout_ms, :integer, default: 300_000)
       field(:max_tokens_per_agent, :integer)
+      field(:budget_warning_pct, :integer, default: 80)
       field(:claude_code_options, :map)
     end
 
@@ -195,6 +214,7 @@ defmodule OdysseyElixir.Config.Schema do
           :read_timeout_ms,
           :stall_timeout_ms,
           :max_tokens_per_agent,
+          :budget_warning_pct,
           :claude_code_options
         ],
         empty_values: []
@@ -239,12 +259,13 @@ defmodule OdysseyElixir.Config.Schema do
       field(:dashboard_enabled, :boolean, default: true)
       field(:refresh_ms, :integer, default: 1_000)
       field(:render_interval_ms, :integer, default: 16)
+      field(:prometheus_enabled, :boolean, default: false)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:dashboard_enabled, :refresh_ms, :render_interval_ms], empty_values: [])
+      |> cast(attrs, [:dashboard_enabled, :refresh_ms, :render_interval_ms, :prometheus_enabled], empty_values: [])
       |> validate_number(:refresh_ms, greater_than: 0)
       |> validate_number(:render_interval_ms, greater_than: 0)
     end
@@ -279,6 +300,7 @@ defmodule OdysseyElixir.Config.Schema do
       field(:read_timeout_ms, :integer, default: 5_000)
       field(:stall_timeout_ms, :integer, default: 300_000)
       field(:max_tokens_per_agent, :integer)
+      field(:budget_warning_pct, :integer, default: 80)
       field(:claude_code_options, :map)
     end
 
@@ -300,10 +322,75 @@ defmodule OdysseyElixir.Config.Schema do
           :read_timeout_ms,
           :stall_timeout_ms,
           :max_tokens_per_agent,
+          :budget_warning_pct,
           :claude_code_options
         ],
         empty_values: []
       )
+    end
+  end
+
+  defmodule Persistence do
+    @moduledoc false
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @primary_key false
+    embedded_schema do
+      field(:mode, :string, default: "memory")
+      field(:database, :string)
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(attrs, [:mode, :database], empty_values: [])
+    end
+  end
+
+  defmodule Budget do
+    @moduledoc false
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @primary_key false
+    embedded_schema do
+      field(:daily_token_limit, :integer)
+      field(:weekly_token_limit, :integer)
+      field(:cost_per_1k_input_tokens, :float)
+      field(:cost_per_1k_output_tokens, :float)
+      field(:currency, :string, default: "USD")
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(
+        attrs,
+        [:daily_token_limit, :weekly_token_limit, :cost_per_1k_input_tokens, :cost_per_1k_output_tokens, :currency],
+        empty_values: []
+      )
+    end
+  end
+
+  defmodule ApprovalGates do
+    @moduledoc false
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @primary_key false
+    embedded_schema do
+      field(:before_dispatch, :boolean, default: false)
+      field(:before_merge, :boolean, default: false)
+      field(:timeout_ms, :integer, default: 600_000)
+      field(:timeout_action, :string, default: "approve")
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(attrs, [:before_dispatch, :before_merge, :timeout_ms, :timeout_action], empty_values: [])
+      |> validate_inclusion(:timeout_action, ["approve", "reject"])
     end
   end
 
@@ -315,12 +402,13 @@ defmodule OdysseyElixir.Config.Schema do
     @primary_key false
     embedded_schema do
       field(:webhook_url, :string)
+      field(:slack_webhook_url, :string)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:webhook_url], empty_values: [])
+      |> cast(attrs, [:webhook_url, :slack_webhook_url], empty_values: [])
     end
   end
 
@@ -353,7 +441,10 @@ defmodule OdysseyElixir.Config.Schema do
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:persistence, Persistence, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:budget, Budget, on_replace: :update, defaults_to_struct: true)
     embeds_one(:notifications, Notifications, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:approval_gates, ApprovalGates, on_replace: :update, defaults_to_struct: true)
     embeds_one(:review_agent, ReviewAgent, on_replace: :update, defaults_to_struct: true)
   end
 
@@ -447,16 +538,15 @@ defmodule OdysseyElixir.Config.Schema do
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:server, with: &Server.changeset/2)
+    |> cast_embed(:persistence, with: &Persistence.changeset/2)
+    |> cast_embed(:budget, with: &Budget.changeset/2)
     |> cast_embed(:notifications, with: &Notifications.changeset/2)
+    |> cast_embed(:approval_gates, with: &ApprovalGates.changeset/2)
     |> cast_embed(:review_agent, with: &ReviewAgent.changeset/2)
   end
 
   defp finalize_settings(settings) do
-    tracker = %{
-      settings.tracker
-      | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
-        assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
-    }
+    tracker = finalize_tracker_settings(settings.tracker)
 
     workspace = %{
       settings.workspace
@@ -477,6 +567,40 @@ defmodule OdysseyElixir.Config.Schema do
     }
 
     %{settings | tracker: tracker, workspace: workspace, codex: codex, review_agent: review_agent}
+  end
+
+  defp finalize_tracker_settings(%Tracker{kind: "linear"} = tracker) do
+    %{
+      tracker
+      | endpoint: tracker.endpoint || "https://api.linear.app/graphql",
+        api_key: resolve_secret_setting(tracker.api_key, System.get_env("LINEAR_API_KEY")),
+        assignee: resolve_secret_setting(tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
+    }
+  end
+
+  defp finalize_tracker_settings(%Tracker{kind: "jira"} = tracker) do
+    %{
+      tracker
+      | api_key: resolve_secret_setting(tracker.api_key, System.get_env("JIRA_API_TOKEN")),
+        email: resolve_secret_setting(tracker.email, System.get_env("JIRA_EMAIL")),
+        base_url: resolve_secret_setting(tracker.base_url, System.get_env("JIRA_BASE_URL"))
+    }
+  end
+
+  defp finalize_tracker_settings(%Tracker{kind: "github"} = tracker) do
+    %{
+      tracker
+      | api_key: resolve_secret_setting(tracker.api_key, System.get_env("GITHUB_TOKEN")),
+        repo: resolve_secret_setting(tracker.repo, System.get_env("GITHUB_REPOSITORY"))
+    }
+  end
+
+  defp finalize_tracker_settings(tracker) do
+    %{
+      tracker
+      | api_key: resolve_secret_setting(tracker.api_key, System.get_env("LINEAR_API_KEY")),
+        assignee: resolve_secret_setting(tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
+    }
   end
 
   defp normalize_keys(value) when is_map(value) do
