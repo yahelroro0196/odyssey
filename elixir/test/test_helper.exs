@@ -1,3 +1,5 @@
-ExUnit.start()
+ExUnit.start(exclude: [:integration, :e2e])
 Code.require_file("support/snapshot_support.exs", __DIR__)
 Code.require_file("support/test_support.exs", __DIR__)
+Code.require_file("support/fake_tracker_clients.exs", __DIR__)
+Code.require_file("support/persistence_test_helper.exs", __DIR__)

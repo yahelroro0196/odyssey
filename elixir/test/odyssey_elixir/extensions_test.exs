@@ -736,19 +736,6 @@ defmodule OdysseyElixir.ExtensionsTest do
     HttpServer.bound_port()
   end
 
-  defp assert_eventually(fun, attempts \\ 20)
-
-  defp assert_eventually(fun, attempts) when attempts > 0 do
-    if fun.() do
-      true
-    else
-      Process.sleep(25)
-      assert_eventually(fun, attempts - 1)
-    end
-  end
-
-  defp assert_eventually(_fun, 0), do: flunk("condition not met in time")
-
   defp ensure_workflow_store_running do
     if Process.whereis(WorkflowStore) do
       :ok

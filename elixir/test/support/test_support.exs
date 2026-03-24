@@ -22,7 +22,14 @@ defmodule OdysseyElixir.TestSupport do
       alias OdysseyElixir.Workspace
 
       import OdysseyElixir.TestSupport,
-        only: [write_workflow_file!: 1, write_workflow_file!: 2, restore_env: 2, stop_default_http_server: 0]
+        only: [
+          write_workflow_file!: 1,
+          write_workflow_file!: 2,
+          restore_env: 2,
+          stop_default_http_server: 0,
+          assert_eventually: 1,
+          assert_eventually: 2
+        ]
 
       setup do
         workflow_root =
@@ -68,6 +75,19 @@ defmodule OdysseyElixir.TestSupport do
 
   def restore_env(key, nil), do: System.delete_env(key)
   def restore_env(key, value), do: System.put_env(key, value)
+
+  def assert_eventually(fun, attempts \\ 20)
+
+  def assert_eventually(fun, attempts) when attempts > 0 do
+    if fun.() do
+      true
+    else
+      Process.sleep(25)
+      assert_eventually(fun, attempts - 1)
+    end
+  end
+
+  def assert_eventually(_fun, 0), do: raise("assert_eventually: condition not met in time")
 
   def stop_default_http_server do
     case Enum.find(Supervisor.which_children(OdysseyElixir.Supervisor), fn
@@ -137,6 +157,11 @@ defmodule OdysseyElixir.TestSupport do
     tracker_assignee = Keyword.get(config, :tracker_assignee)
     tracker_active_states = Keyword.get(config, :tracker_active_states)
     tracker_terminal_states = Keyword.get(config, :tracker_terminal_states)
+    tracker_base_url = Keyword.get(config, :tracker_base_url)
+    tracker_project_key = Keyword.get(config, :tracker_project_key)
+    tracker_email = Keyword.get(config, :tracker_email)
+    tracker_jql_filter = Keyword.get(config, :tracker_jql_filter)
+    tracker_repo = Keyword.get(config, :tracker_repo)
     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
     workspace_root = Keyword.get(config, :workspace_root)
     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
@@ -176,6 +201,11 @@ defmodule OdysseyElixir.TestSupport do
         "  assignee: #{yaml_value(tracker_assignee)}",
         "  active_states: #{yaml_value(tracker_active_states)}",
         "  terminal_states: #{yaml_value(tracker_terminal_states)}",
+        tracker_base_url && "  base_url: #{yaml_value(tracker_base_url)}",
+        tracker_project_key && "  project_key: #{yaml_value(tracker_project_key)}",
+        tracker_email && "  email: #{yaml_value(tracker_email)}",
+        tracker_jql_filter && "  jql_filter: #{yaml_value(tracker_jql_filter)}",
+        tracker_repo && "  repo: #{yaml_value(tracker_repo)}",
         "polling:",
         "  interval_ms: #{yaml_value(poll_interval_ms)}",
         "workspace:",
