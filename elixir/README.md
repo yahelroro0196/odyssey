@@ -13,15 +13,14 @@ This directory contains the current Elixir/OTP implementation of Odyssey, based 
 
 ## How it works
 
-1. Polls Linear for candidate work
-2. Creates a workspace per issue
-3. Launches Codex in [App Server mode](https://developers.openai.com/codex/app-server/) inside the
-   workspace
-4. Sends a workflow prompt to Codex
-5. Keeps Codex working on the issue until the work is done
+1. Polls an issue tracker (Linear, Jira, or GitHub Issues) for candidate work
+2. Creates an isolated workspace per issue
+3. Launches an agent (Codex or Claude Code) inside the workspace
+4. Sends a workflow prompt to the agent
+5. Keeps the agent working on the issue across multiple turns until done
 
-During app-server sessions, Odyssey also serves a client-side `linear_graphql` tool so that repo
-skills can make raw Linear GraphQL calls.
+During sessions, Odyssey serves tracker-specific tools (`linear_graphql`, `jira_api`, or
+`github_api`) so agent skills can interact with the issue tracker directly.
 
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Odyssey stops the active agent for that issue and cleans up matching workspaces.
@@ -151,14 +150,16 @@ codex:
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
   `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
 
-## Web dashboard
+## Web Dashboard
 
-The observability UI now runs on a minimal Phoenix stack:
+The observability UI runs on a minimal Phoenix stack:
 
-- LiveView for the dashboard at `/`
-- JSON API for operational debugging under `/api/v1/*`
+- LiveView dashboard at `/` with real-time session tracking, token totals, cost estimation, and approval gates
+- Split-pane agent stream view at `/tmux`
+- Single agent chat view at `/issues/:id`
+- JSON API under `/api/v1/*` (see [API.md](../API.md))
+- Prometheus metrics at `/metrics` (when `observability.prometheus_enabled: true`)
 - Bandit as the HTTP server
-- Phoenix dependency static assets for the LiveView client bootstrap
 
 ## Project Layout
 
@@ -170,6 +171,16 @@ The observability UI now runs on a minimal Phoenix stack:
 ## Testing
 
 ```bash
+# Unit + component tests (default, fast)
+mix test
+
+# Include integration tests
+mix test --include integration
+
+# Include all tiers
+mix test --include integration --include e2e
+
+# Full build + lint
 make all
 ```
 

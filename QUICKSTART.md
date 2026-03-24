@@ -51,11 +51,59 @@ Status: {{ issue.state }}
 {% endif %}
 ```
 
-Set your Linear API key:
+### Tracker Authentication
+
+Set the API key for your tracker:
 
 ```bash
+# Linear
 export LINEAR_API_KEY=lin_api_your_key_here
+
+# Jira
+export JIRA_API_TOKEN=your_jira_token
+export JIRA_EMAIL=you@company.com
+export JIRA_BASE_URL=https://yourcompany.atlassian.net
+
+# GitHub Issues
+export GITHUB_TOKEN=ghp_your_token_here
 ```
+
+### Other Tracker Examples
+
+<details>
+<summary>Jira configuration</summary>
+
+```yaml
+tracker:
+  kind: jira
+  base_url: "https://yourcompany.atlassian.net"
+  project_key: "PROJ"
+  active_states:
+    - To Do
+    - In Progress
+  terminal_states:
+    - Done
+    - Cancelled
+```
+</details>
+
+<details>
+<summary>GitHub Issues configuration</summary>
+
+```yaml
+tracker:
+  kind: github
+  repo: "owner/repo"
+  active_states:
+    - todo
+    - in-progress
+  terminal_states:
+    - done
+    - closed
+```
+
+Note: GitHub Issues uses labels to simulate workflow states.
+</details>
 
 ## Run
 
@@ -92,6 +140,50 @@ When running with a port, open `http://localhost:4000`:
 - `/tmux` — Split-pane view of all agent streams
 - `/issues/:id` — Single agent chat view
 - `/api/v1/state` — JSON API
+
+## Optional Features
+
+Add these sections to your `WORKFLOW.md` front matter to enable additional capabilities.
+
+### Persistent State (crash recovery)
+
+```yaml
+persistence:
+  mode: sqlite
+```
+
+### Prometheus Metrics & Slack Notifications
+
+```yaml
+observability:
+  prometheus_enabled: true
+notifications:
+  slack_webhook_url: "https://hooks.slack.com/services/..."
+```
+
+### Approval Gates
+
+```yaml
+approval_gates:
+  before_dispatch: true
+  before_merge: true
+  timeout_ms: 600000
+  timeout_action: approve
+```
+
+### Token Budgets
+
+```yaml
+budget:
+  daily_token_limit: 5000000
+  cost_per_1k_input_tokens: 0.003
+  cost_per_1k_output_tokens: 0.015
+codex:
+  max_tokens_per_agent: 500000
+  budget_warning_pct: 80
+```
+
+See [CONFIGURATION.md](CONFIGURATION.md) for the full config reference.
 
 ## Update
 

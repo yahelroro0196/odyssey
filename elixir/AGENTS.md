@@ -1,6 +1,6 @@
 # Odyssey Elixir
 
-This directory contains the Elixir agent orchestration service that polls Linear, creates per-issue workspaces, and runs Codex in app-server mode.
+This directory contains the Elixir agent orchestration service that polls issue trackers (Linear, Jira, GitHub Issues), creates per-issue workspaces, and runs coding agents (Codex, Claude Code).
 
 ## Environment
 
@@ -22,9 +22,22 @@ This directory contains the Elixir agent orchestration service that polls Linear
   - Never run Codex turn cwd in source repo.
   - Workspaces must stay under configured workspace root.
 - Orchestrator behavior is stateful and concurrency-sensitive; preserve retry, reconciliation, and cleanup semantics.
-- Follow `docs/logging.md` for logging conventions and required issue/session context fields.
+- Follow `docs/LOGGING.md` for logging conventions and required issue/session context fields.
+- New tracker adapters must implement `OdysseyElixir.Tracker` behaviour and use `client_module/0` DI pattern (see `linear/adapter.ex:76`).
+- Persistence code goes under `lib/odyssey_elixir/persistence/`; new tables need an Ecto migration and schema.
+- New Ecto schemas live in `lib/odyssey_elixir/persistence/schemas/`.
 
 ## Tests and Validation
+
+Tests use a tiered tag system:
+
+```bash
+mix test                           # Unit + component (default)
+mix test --include integration     # + integration tests
+mix test --include e2e             # + end-to-end tests
+```
+
+Tag new tests with `@tag :integration` or `@tag :e2e` as appropriate. Use `FakeJiraClient`/`FakeGitHubClient` from `test/support/fake_tracker_clients.exs` for tracker adapter tests.
 
 Run targeted tests while iterating, then run full gates before handoff.
 

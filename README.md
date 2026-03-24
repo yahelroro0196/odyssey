@@ -11,6 +11,27 @@ _In this [demo video](.github/media/odyssey-demo.mp4), Odyssey monitors a Linear
 > [!WARNING]
 > Odyssey is a low-key engineering preview for testing in trusted environments.
 
+## Features
+
+- **Multi-tracker support** — Poll issues from Linear, Jira, or GitHub Issues via a pluggable adapter layer
+- **Multiple agent runtimes** — Run Codex (JSON-RPC) or Claude Code (CLI) as the coding agent backend
+- **Persistent state & crash recovery** — Optional SQLite-backed persistence for retry queues, session history, and token accounting
+- **Human-in-the-loop approval gates** — Configurable checkpoints before dispatch or merge, with dashboard UI and REST API
+- **Prometheus metrics & Slack alerts** — Export telemetry to `/metrics` and send event notifications to Slack
+- **Token budget enforcement** — Per-agent and global daily/weekly token caps with soft warnings and cost estimation
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [QUICKSTART.md](QUICKSTART.md) | Get running in minutes |
+| [SPEC.md](SPEC.md) | Language-agnostic service specification |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System design and component overview |
+| [CONFIGURATION.md](CONFIGURATION.md) | Full WORKFLOW.md config reference |
+| [API.md](API.md) | REST API endpoint reference |
+| [CHANGELOG.md](CHANGELOG.md) | Version history |
+| [elixir/README.md](elixir/README.md) | Elixir reference implementation setup |
+
 ## Supported Agent Runtimes
 
 Odyssey supports multiple coding agent backends, configurable per role (coder / reviewer) in
